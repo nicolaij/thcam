@@ -10,8 +10,6 @@
 
 #include "driver/temperature_sensor.h"
 
-#include "led_strip.h"
-
 static const char *TAG = "THCAM";
 
 RTC_DATA_ATTR int bootCount = 0;
@@ -25,34 +23,6 @@ RTC_DATA_ATTR measure_data_t old_measure;
 EventGroupHandle_t ready_event_group;
 
 char buf[40];
-
-led_strip_handle_t configure_led(void)
-{
-    // LED strip general initialization, according to your led board design
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = GPIO_NUM_8,             // The GPIO that connected to the LED strip's data line
-        .max_leds = 1,                            // The number of LEDs in the strip,
-        .led_pixel_format = LED_PIXEL_FORMAT_GRB, // Pixel format of your LED strip
-        .led_model = LED_MODEL_SK6812,            // LED strip model
-        .flags.invert_out = false,                // whether to invert the output signal
-    };
-
-// 10MHz resolution, 1 tick = 0.1us (led strip needs a high resolution)
-#define LED_STRIP_RMT_RES_HZ (10 * 1000 * 1000)
-
-    // LED strip backend configuration: RMT
-    led_strip_rmt_config_t rmt_config = {
-        .clk_src = RMT_CLK_SRC_DEFAULT,        // different clock source can lead to different power consumption
-        .resolution_hz = LED_STRIP_RMT_RES_HZ, // RMT counter clock frequency
-        .flags.with_dma = false,               // DMA feature is available on ESP target like ESP32-S3
-    };
-
-    // LED Strip object handle
-    led_strip_handle_t led_strip;
-    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
-    ESP_LOGI(TAG, "Created LED strip object with RMT backend");
-    return led_strip;
-}
 
 void app_main(void)
 {
@@ -119,12 +89,6 @@ void app_main(void)
     ESP_LOGI("main", "Boot number: %d", bootCount);
     result.bootCount = bootCount;
 
-    // LED
-    led_strip_handle_t led_strip = configure_led();
-    ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, 0, 127, 0, 0));
-    /* Refresh the strip to send data */
-    ESP_ERROR_CHECK(led_strip_refresh(led_strip));
-
     // Light, Water
     dio_init();
 
@@ -164,7 +128,7 @@ void app_main(void)
     };
 
     esp_err_t err_rc;
-    
+
     i2c_master_bus_handle_t bus_handle;
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
@@ -172,7 +136,7 @@ void app_main(void)
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = 0x40, // HTU21
-        .scl_speed_hz = 100000,
+        .scl_speed_hz = 400000,
     };
 
     uint8_t buffer[4];
@@ -180,17 +144,27 @@ void app_main(void)
     i2c_master_dev_handle_t dev_handle;
     ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev_handle));
 
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uint8_t cmd = 0xfe; // Soft Reset
-    err_rc = i2c_master_transmit(dev_handle, &cmd, 1, 100);
+    err_rc = i2c_master_probe(bus_handle, dev_cfg.device_address, 10);
+
+    int try = 5;
+    while (err_rc != ESP_OK && try-- > 0)
+    {
+        err_rc = i2c_master_probe(bus_handle, dev_cfg.device_address, 10);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
 
     if (err_rc == ESP_OK)
     {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        // vTaskDelay(500 / portTICK_PERIOD_MS);
+        uint8_t cmd = 0xfe; // Soft Reset
+        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
+
+        vTaskDelay(20 / portTICK_PERIOD_MS); // The soft reset takes less than 15ms.
+
         cmd = 0xe3; // Trigger Temperature Measurement
-        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 100));
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-        err_rc = i2c_master_receive(dev_handle, buffer, 3, 100);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+        err_rc = i2c_master_receive(dev_handle, buffer, 3, 10);
 
         if (err_rc == ESP_OK && (buffer[1] & 0b10) == 0) // Status (‘0’: temperature, ‘1’: humidity)
         {
@@ -198,39 +172,55 @@ void app_main(void)
         }
 
         cmd = 0xe5; // Trigger Humidity Measurement
-        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 100));
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
+        vTaskDelay(50 / portTICK_PERIOD_MS);
         err_rc = i2c_master_receive(dev_handle, buffer, 3, 100);
 
-        if ((buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)
+        if (err_rc == ESP_OK && (buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)
         {
             result.measure.humidity = -6.0 + 125.0 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
         }
 
         ESP_LOGI(TAG, "Read from I2C: T=%.01f°C, H=%.01f%%", result.measure.temp, result.measure.humidity);
-
-        ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
     }
+    else
+    {
+        ESP_LOGE(TAG, "I2C sensor error!");
+    }
+
+    ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
 
     ESP_ERROR_CHECK(i2c_del_master_bus(bus_handle));
 
     ready_event_group = xEventGroupCreate();
 
-    xTaskCreate(modem_task, "modem_task", 1024 * 4, NULL, configMAX_PRIORITIES - 10, NULL);
+    xTaskCreate(modem_task, "modem_task", 1024 * 6, NULL, configMAX_PRIORITIES - 10, NULL);
 
-    xEventGroupWaitBits(
+    xTaskCreate(led_task, "led_task", 1024 * 6, NULL, configMAX_PRIORITIES - 15, NULL);
+
+    EventBits_t uxBits = xEventGroupWaitBits(
         ready_event_group, /* The event group being tested. */
         END_RADIO_SLEEP,   /* The bits within the event group to wait for. */
         pdFALSE,           /* BIT_0 & BIT_1 should be cleared before returning. */
         pdTRUE,
-        1200000 / portTICK_PERIOD_MS);
+        180000 / portTICK_PERIOD_MS);
+
+    xEventGroupSetBits(ready_event_group, END_WORK);
+
+    //если модуль nbiot не выключился - то выключаем принудительно 
+    if ((uxBits & END_RADIO_SLEEP) == 0)
+    {
+        ESP_LOGW("main", "Force power off NB-IoT");
+        nbiot_power_pin(2000 / portTICK_PERIOD_MS);
+    }
 
     // Light, Water
     dio_sleep();
 
-    uint64_t time_in_us = 5ULL * 60ULL * 1000000ULL;
+    uint64_t time_in_us = 10ULL * 60ULL * 1000000ULL;
 
     ESP_LOGW("main", "Go sleep: %lld us", time_in_us);
+    // ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout,0xffff));
     fflush(stdout);
 
     esp_sleep_enable_timer_wakeup(time_in_us);

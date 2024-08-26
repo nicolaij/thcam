@@ -11,17 +11,39 @@
 #define PIN_WATER1 GPIO_NUM_2
 #define PIN_WATER2 GPIO_NUM_4
 
-#define TXD_PIN (GPIO_NUM_18)
-#define RXD_PIN (GPIO_NUM_19)
+#define TXD_PIN (GPIO_NUM_19)
+#define RXD_PIN (GPIO_NUM_18)
 
 #define END_RADIO_SLEEP BIT3
+#define END_WORK BIT1
 
 extern EventGroupHandle_t ready_event_group;
 
 void modem_task(void *arg);
+void led_task(void *arg);
 
 void dio_init();
 void dio_sleep();
+
+void nbiot_power_pin(const TickType_t xTicksToDelay);
+
+typedef struct
+{
+    union
+    {
+        uint32_t set;
+        struct
+        {
+            uint8_t bright;
+            uint8_t red;
+            uint8_t green;
+            uint8_t blue;
+        };
+    };
+
+    TickType_t xTicksToDelay;
+
+} led_task_data_t;
 
 typedef struct
 {

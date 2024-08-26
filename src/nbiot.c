@@ -80,7 +80,7 @@ esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t timeout)
     res = ESP_ERR_TIMEOUT;
     while ((esp_timer_get_time() - start_time) < timeout * portTICK_PERIOD_MS * 1000)
     {
-        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), 10);
+        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), pdMS_TO_TICKS(500));
         // ESP_LOGV(TAG, "len: %d", len);
         if (len > 0)
         {
@@ -160,16 +160,18 @@ esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *res
 cmd "AT+CSOSEND=0"
 data "Hello World!!!"
 */
-esp_err_t at_csosend(const char *cmd, char *data, char *buffer)
+esp_err_t at_csosend(int socket, char *data, char *buffer)
 {
     char buf[14];
     int len_data = strlen(data);
-    int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
+
+    snprintf(buf, sizeof(buf), "AT+CSOSEND=%d,", socket);
+    int txBytes = uart_write_bytes(UART_NUM_1, buf, strlen(buf));
     if (txBytes < 4)
     {
         return ESP_ERR_INVALID_SIZE;
     }
-    snprintf(buf, 14, ",%d,", len_data * 2);
+    snprintf(buf, sizeof(buf), "%d,", len_data * 2);
     txBytes = uart_write_bytes(UART_NUM_1, buf, strlen(buf));
     if (txBytes < 3)
     {
@@ -187,7 +189,7 @@ esp_err_t at_csosend(const char *cmd, char *data, char *buffer)
     }
     txBytes = uart_write_bytes(UART_NUM_1, "\r", 1);
 
-    int len = uart_read_bytes(UART_NUM_1, buffer, (RX_BUF_SIZE - 1), 5000 / portTICK_PERIOD_MS);
+    int len = uart_read_bytes(UART_NUM_1, buffer, (RX_BUF_SIZE - 1), 30000 / portTICK_PERIOD_MS);
     if (len < 4)
     {
         return ESP_ERR_TIMEOUT;
@@ -216,9 +218,10 @@ void modem_task(void *arg)
     // disable pull-down mode
     io_conf.pull_down_en = 0;
     // disable pull-up mode
-    io_conf.pull_up_en = 0;
+    io_conf.pull_up_en = 1;
     // configure GPIO with the given settings
     gpio_config(&io_conf);
+    gpio_set_level(MODEM_POWER, 1);
 
     const uart_config_t uart_config = {
         .baud_rate = 9600,
@@ -246,11 +249,11 @@ void modem_task(void *arg)
         ee = at_reply_wait("AT\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
         if (ee != ESP_OK)
         {
-            gpio_set_level(MODEM_POWER, 0);
             ESP_LOGW(TAG, "Modem not reply");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            gpio_set_level(MODEM_POWER, 1);
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            // power on
+            nbiot_power_pin(1000 / portTICK_PERIOD_MS);
+
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
             continue;
         }
 
@@ -436,7 +439,17 @@ void modem_task(void *arg)
 
             strncpy(pdp_ip, s + 1, 18);
 
-            ESP_LOGI(TAG, "IP: %s", pdp_ip);
+            // если нет нормального IP - рестарт модуля
+            if (atoi(pdp_ip) == 127)
+            {
+                ESP_LOGE(TAG, "IP: %s", pdp_ip);
+                print_atcmd("AT+CPOWD=1\r\n", data);
+                continue;
+            }
+            else
+            {
+                ESP_LOGI(TAG, "IP: %s", pdp_ip);
+            }
         };
 
         /*
@@ -475,61 +488,78 @@ void modem_task(void *arg)
         */
         ee = at_reply_wait_OK("AT+CSOSENDFLAG=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 
+        int socket = 0;
+
         ee = at_reply_wait_OK("AT+CSOC=1,1,1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
         if (ee != ESP_OK)
         {
             ESP_LOGW(TAG, "AT+CSOC=1,1,1");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
         else
         {
-            ESP_LOGI(TAG, "Connect...");
+            char *pdata = strstr((const char *)data, "CSOC: ");
+            socket = atoi(pdata + 6);
 
-            try_counter = 0;
-            while (try_counter < 3)
+            ESP_LOGI(TAG, "Socket %i connect...", socket);
+
+            snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,48885,\"10.179.40.20\"\r\n", socket);
+
+            try_counter = 3;
+            while (try_counter)
             {
-                ee = at_reply_wait_OK("AT+CSOCON=0,48885,\"10.179.40.20\"\r\n", (char *)data, 60000 / portTICK_PERIOD_MS);
+                ee = at_reply_wait_OK(send_data, (char *)data, 60000 / portTICK_PERIOD_MS);
                 if (ee != ESP_OK)
                 {
                     ESP_LOGW(TAG, "AT+CSOCON:%s", data);
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
-                    try_counter++;
-                    continue;
-                }
-
-                // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
-                snprintf(send_data, sizeof(send_data), "{\"id\":\"cam1\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f}", result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity);
-
-                ESP_LOGI(TAG, "Send...");
-
-                ee = at_csosend("AT+CSOSEND=0", send_data, (char *)data);
-                if (ee != ESP_OK)
-                {
-                    ESP_LOGW(TAG, "AT+CSOSEND");
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
-                    try_counter++;
-                    continue;
                 }
                 else
                 {
-                    break;
+
+                    // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
+                    snprintf(send_data, sizeof(send_data), "{\"id\":\"cam1\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f}", result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity);
+
+                    ESP_LOGI(TAG, "Send...");
+
+                    ee = at_csosend(socket, send_data, (char *)data);
+                    if (ee == ESP_OK)
+                    {
+                        break;
+                    }
+
+                    ESP_LOGW(TAG, "AT+CSOSEND");
                 }
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                try_counter--;
             }
 
             // wait to transmit
-            vTaskDelay(5000 / portTICK_PERIOD_MS);
+            // vTaskDelay(10000 / portTICK_PERIOD_MS);
         };
 
-        at_reply_wait_OK("AT+CSOCL=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS); // CLOSE seocket
+        snprintf(send_data, sizeof(send_data), "AT+CSOCL=%i\r\n", socket);
+        at_reply_wait_OK(send_data, (char *)data, 1000 / portTICK_PERIOD_MS); // CLOSE socket
         break;
     }
 
-    print_atcmd("AT+CPOWD=1\r\n", data);
+    //если есть бит END_WORK - то модуль уже выключили из main()
+    EventBits_t uxBits = xEventGroupGetBits(ready_event_group);
+    if ((uxBits & END_WORK) == 0)
+    {
+        print_atcmd("AT+CPOWD=1\r\n", data);
+        //print_atcmd("AT+CFUN=0\r\n", data);
+    }
 
     xEventGroupSetBits(ready_event_group, END_RADIO_SLEEP);
 
     while (1)
     {
-        vTaskDelay(1000000 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
+}
+
+void nbiot_power_pin(const TickType_t xTicksToDelay)
+{
+    gpio_set_level(MODEM_POWER, 0);
+    vTaskDelay(xTicksToDelay);
+    gpio_set_level(MODEM_POWER, 1);
 }
