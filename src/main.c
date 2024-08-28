@@ -89,6 +89,9 @@ void app_main(void)
     ESP_LOGI("main", "Boot number: %d", bootCount);
     result.bootCount = bootCount;
 
+    init_nvs();
+    read_nvs_menu();
+
     // Light, Water
     dio_init();
 
@@ -194,9 +197,11 @@ void app_main(void)
 
     ready_event_group = xEventGroupCreate();
 
-    xTaskCreate(modem_task, "modem_task", 1024 * 6, NULL, configMAX_PRIORITIES - 10, NULL);
+    xTaskCreate(modem_task, "modem_task", 1024 * 10, NULL, configMAX_PRIORITIES - 10, NULL);
 
-    xTaskCreate(led_task, "led_task", 1024 * 6, NULL, configMAX_PRIORITIES - 15, NULL);
+    xTaskCreate(led_task, "led_task", 1024 * 5, NULL, configMAX_PRIORITIES - 15, NULL);
+
+    xTaskCreate(console_task, "console_task", 1024 * 10, NULL, configMAX_PRIORITIES - 15, NULL);
 
     EventBits_t uxBits = xEventGroupWaitBits(
         ready_event_group, /* The event group being tested. */
@@ -207,7 +212,7 @@ void app_main(void)
 
     xEventGroupSetBits(ready_event_group, END_WORK);
 
-    //если модуль nbiot не выключился - то выключаем принудительно 
+    // если модуль nbiot не выключился - то выключаем принудительно
     if ((uxBits & END_RADIO_SLEEP) == 0)
     {
         ESP_LOGW("main", "Force power off NB-IoT");
@@ -217,7 +222,9 @@ void app_main(void)
     // Light, Water
     dio_sleep();
 
-    uint64_t time_in_us = 10ULL * 60ULL * 1000000ULL;
+    int min = get_menu_id("time");
+
+    uint64_t time_in_us = min * 60ULL * 1000000ULL;
 
     ESP_LOGW("main", "Go sleep: %lld us", time_in_us);
     // ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout,0xffff));

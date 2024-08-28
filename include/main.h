@@ -2,6 +2,8 @@
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 
+#include "esp_log.h"
+
 #include <sys/time.h>
 
 #define MODEM_POWER GPIO_NUM_10
@@ -21,11 +23,26 @@ extern EventGroupHandle_t ready_event_group;
 
 void modem_task(void *arg);
 void led_task(void *arg);
+void console_task(void *arg);
+
+esp_err_t read_nvs_menu();
+esp_err_t init_nvs();
+int get_menu_id(const char *id);
 
 void dio_init();
 void dio_sleep();
 
 void nbiot_power_pin(const TickType_t xTicksToDelay);
+
+typedef struct
+{
+    const char id[10];
+    const char name[48];
+    const char izm[8];
+    int32_t val;
+    const int32_t min;
+    const int32_t max;
+} menu_t;
 
 typedef struct
 {
