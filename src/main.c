@@ -191,7 +191,7 @@ void app_main(void)
         ESP_LOGE(TAG, "I2C sensor error!");
     }
 
-    ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
+    // ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
 
     ESP_ERROR_CHECK(i2c_del_master_bus(bus_handle));
 
@@ -199,16 +199,20 @@ void app_main(void)
 
     xTaskCreate(modem_task, "modem_task", 1024 * 10, NULL, configMAX_PRIORITIES - 10, NULL);
 
-    xTaskCreate(led_task, "led_task", 1024 * 5, NULL, configMAX_PRIORITIES - 15, NULL);
+    //xTaskCreate(led_task, "led_task", 1024 * 5, NULL, configMAX_PRIORITIES - 15, NULL);
+
+    xTaskCreate(btn_task, "btn_task", 1024 * 3, NULL, configMAX_PRIORITIES - 15, NULL);
 
     xTaskCreate(console_task, "console_task", 1024 * 10, NULL, configMAX_PRIORITIES - 15, NULL);
+
+    int wait = get_menu_id("waitnb");
 
     EventBits_t uxBits = xEventGroupWaitBits(
         ready_event_group, /* The event group being tested. */
         END_RADIO_SLEEP,   /* The bits within the event group to wait for. */
         pdFALSE,           /* BIT_0 & BIT_1 should be cleared before returning. */
         pdTRUE,
-        180000 / portTICK_PERIOD_MS);
+        wait * 60000 / portTICK_PERIOD_MS);
 
     xEventGroupSetBits(ready_event_group, END_WORK);
 

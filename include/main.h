@@ -12,6 +12,7 @@
 #define PIN_LIGHT GPIO_NUM_3
 #define PIN_WATER1 GPIO_NUM_2
 #define PIN_WATER2 GPIO_NUM_4
+#define PIN_BUTTON_BOOT GPIO_NUM_9
 
 #define TXD_PIN (GPIO_NUM_19)
 #define RXD_PIN (GPIO_NUM_18)
@@ -24,6 +25,7 @@ extern EventGroupHandle_t ready_event_group;
 void modem_task(void *arg);
 void led_task(void *arg);
 void console_task(void *arg);
+void btn_task(void *arg);
 
 esp_err_t read_nvs_menu();
 esp_err_t init_nvs();
@@ -37,7 +39,7 @@ void nbiot_power_pin(const TickType_t xTicksToDelay);
 typedef struct
 {
     const char id[10];
-    const char name[48];
+    const char name[64];
     const char izm[8];
     int32_t val;
     const int32_t min;
@@ -80,6 +82,8 @@ typedef struct
     float water;
     float water2;
     float battery;
+    float nbbattery;
+    float rssi;
 } measure_data_t;
 
 typedef struct

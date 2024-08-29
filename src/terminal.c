@@ -16,6 +16,7 @@ nvs_handle_t my_handle;
 menu_t menu[] = {
     {.id = "id", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
     {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 10, .max = 100000},
+    {.id = "waitnb", .name = "Ожидание окончания передачи", .izm = "мин", .val = 3, .min = 1, .max = 60},
 };
 
 esp_err_t init_nvs()
@@ -169,6 +170,12 @@ void console_task(void *arg)
                     }
                     else
                     {
+                        char datetime[24];
+                        struct tm *localtm = localtime(&result.ttime);
+                        strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
+
+                        ESP_LOGI("result", "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%.0f,\"NBbatt\":%.3f,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f}", get_menu_id("id"), result.bootCount, datetime, result.measure.rssi, result.measure.nbbattery, result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity);
+
                         ESP_LOGI("menu", "-------------------------------------------");
                         for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
                         {

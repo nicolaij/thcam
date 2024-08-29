@@ -259,6 +259,16 @@ void modem_task(void *arg)
 
         ee = at_reply_wait("ATE1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
 
+        // Battery Charge
+        int cbc[2] = {-1, -1};
+        ee = at_reply_get("AT+CBC\r\n", "CBC:", (char *)data, cbc, 2, 1000 / portTICK_PERIOD_MS);
+        result.measure.nbbattery = cbc[1] / 1000.0;
+        if (ee != ESP_OK)
+        {
+            ESP_LOGW(TAG, "AT+CBC");
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+
         // Reset and Set Phone Functionality
         if ((try_counter % 5) == 0) // if fail restart sim
         {
@@ -315,18 +325,10 @@ void modem_task(void *arg)
         // Signal Quality Report
         int csq[2] = {-1, -1};
         ee = at_reply_get("AT+CSQ\r\n", "CSQ:", (char *)data, csq, 2, 1000 / portTICK_PERIOD_MS);
+        result.measure.rssi = csq[0] * 2.0 + -113.0;
         if (ee != ESP_OK)
         {
             ESP_LOGW(TAG, "AT+CSQ");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-
-        // Battery Charge
-        int cbc[2] = {-1, -1};
-        ee = at_reply_get("AT+CBC\r\n", "CBC:", (char *)data, cbc, 2, 1000 / portTICK_PERIOD_MS);
-        if (ee != ESP_OK)
-        {
-            ESP_LOGW(TAG, "AT+CBC");
             vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 

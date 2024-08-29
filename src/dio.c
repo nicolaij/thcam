@@ -331,3 +331,46 @@ void led_task(void *arg)
         }
     }
 }
+
+void btn_task(void *arg)
+{
+    gpio_config_t io_conf = {};
+    // disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    // set as output mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    // bit mask of the pins that you want to set
+    io_conf.pin_bit_mask = BIT64(PIN_BUTTON_BOOT);
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    // configure GPIO with the given settings
+    gpio_config(&io_conf);
+
+    int debounce = 0;
+
+    while (true)
+    {
+        if (gpio_get_level(PIN_BUTTON_BOOT) == 0)
+        {
+            debounce++;
+        }
+        else
+        {
+            if (debounce > 0)
+                debounce--;
+
+            if (debounce > 50) // долгое нажатие
+            {
+                ESP_LOGI("IO", "Button long press!");
+                debounce = 0;
+            }
+            else if (debounce > 5) // короткое нажатие
+            {
+                ESP_LOGI("IO", "Button short press!");
+                debounce = 0;
+            };
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+};
