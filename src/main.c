@@ -7,8 +7,15 @@
 #include "esp_mac.h"
 
 #include "driver/i2c_master.h"
+i2c_master_dev_handle_t dev_handle;
 
 #include "driver/temperature_sensor.h"
+
+#include "bme280.h"
+s8 BME280_I2C_bus_write(u8 dev_addr, u8 reg_addr, u8 *reg_data, u8 cnt);
+s8 BME280_I2C_bus_read(u8 dev_addr, u8 reg_addr, u8 *reg_data, u8 cnt);
+void BME280_delay_msek(u32 msek);
+#define TAG_BME280 "BME280"
 
 static const char *TAG = "THCAM";
 
@@ -27,6 +34,8 @@ char buf[40];
 void app_main(void)
 {
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+
+    ready_event_group = xEventGroupCreate();
 
     switch (wakeup_reason)
     {
@@ -58,6 +67,11 @@ void app_main(void)
             int pin = __builtin_ffsll(wakeup_pin_mask) - 1;
             ESP_LOGI("main", "Wake up from GPIO %d", pin);
 
+            if (pin == PIN_BATT)
+            {
+                result.measure.d_charge = true;
+                xEventGroupSetBits(ready_event_group, NEED_WIFI);
+            }
             if (pin == PIN_LIGHT)
                 result.measure.d_light = true;
             if (pin == PIN_WATER1)
@@ -144,47 +158,113 @@ void app_main(void)
 
     uint8_t buffer[4];
 
-    i2c_master_dev_handle_t dev_handle;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev_handle));
-
-    err_rc = i2c_master_probe(bus_handle, dev_cfg.device_address, 10);
-
-    int try = 5;
-    while (err_rc != ESP_OK && try-- > 0)
+    int try = 2;
+    do
     {
+        try--;
+        ESP_LOGD("THCAM", "try %d", dev_cfg.device_address);
         err_rc = i2c_master_probe(bus_handle, dev_cfg.device_address, 10);
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-    }
+        if (err_rc != ESP_OK)
+        {
+            if (try == 0)
+            {
+                if (dev_cfg.device_address != BME280_I2C_ADDRESS1)
+                {
+                    dev_cfg.device_address = BME280_I2C_ADDRESS1;
+                    // dev_cfg.scl_speed_hz = 100000;
+                    try = 2;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+        }
+    } while (err_rc != ESP_OK);
 
     if (err_rc == ESP_OK)
     {
-        // vTaskDelay(500 / portTICK_PERIOD_MS);
-        uint8_t cmd = 0xfe; // Soft Reset
-        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
 
-        vTaskDelay(20 / portTICK_PERIOD_MS); // The soft reset takes less than 15ms.
+        ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev_handle));
 
-        cmd = 0xe3; // Trigger Temperature Measurement
-        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
-        vTaskDelay(50 / portTICK_PERIOD_MS);
-        err_rc = i2c_master_receive(dev_handle, buffer, 3, 10);
-
-        if (err_rc == ESP_OK && (buffer[1] & 0b10) == 0) // Status (‘0’: temperature, ‘1’: humidity)
+        if (dev_cfg.device_address == 0x40) // HTU21
         {
-            result.measure.temp = -46.85 + 175.72 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
+            uint8_t cmd = 0xfe; // Soft Reset
+            ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
+
+            vTaskDelay(20 / portTICK_PERIOD_MS); // The soft reset takes less than 15ms.
+
+            cmd = 0xe3; // Trigger Temperature Measurement
+            ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+            err_rc = i2c_master_receive(dev_handle, buffer, 3, 10);
+
+            if (err_rc == ESP_OK && (buffer[1] & 0b10) == 0) // Status (‘0’: temperature, ‘1’: humidity)
+            {
+                result.measure.temp = -46.85 + 175.72 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
+            }
+
+            cmd = 0xe5; // Trigger Humidity Measurement
+            ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+            err_rc = i2c_master_receive(dev_handle, buffer, 3, 100);
+
+            if (err_rc == ESP_OK && (buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)
+            {
+                result.measure.humidity = -6.0 + 125.0 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
+            }
+
+            ESP_LOGI(TAG, "Read from I2C: T=%.01f°C, H=%.01f%%", result.measure.temp, result.measure.humidity);
         }
 
-        cmd = 0xe5; // Trigger Humidity Measurement
-        ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(dev_handle, &cmd, 1, 10));
-        vTaskDelay(50 / portTICK_PERIOD_MS);
-        err_rc = i2c_master_receive(dev_handle, buffer, 3, 100);
-
-        if (err_rc == ESP_OK && (buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)
+        if (dev_cfg.device_address == BME280_I2C_ADDRESS1) // BME280
         {
-            result.measure.humidity = -6.0 + 125.0 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
-        }
 
-        ESP_LOGI(TAG, "Read from I2C: T=%.01f°C, H=%.01f%%", result.measure.temp, result.measure.humidity);
+            struct bme280_t bme280 = {
+                .bus_write = BME280_I2C_bus_write,
+                .bus_read = BME280_I2C_bus_read,
+                .dev_addr = BME280_I2C_ADDRESS1,
+                .delay_msec = BME280_delay_msek};
+
+            s32 com_rslt;
+            s32 v_uncomp_pressure_s32;
+            s32 v_uncomp_temperature_s32;
+            s32 v_uncomp_humidity_s32;
+
+            com_rslt = bme280_init(&bme280);
+
+            com_rslt += bme280_set_oversamp_pressure(BME280_OVERSAMP_1X);
+            com_rslt += bme280_set_oversamp_temperature(BME280_OVERSAMP_1X);
+            com_rslt += bme280_set_oversamp_humidity(BME280_OVERSAMP_1X);
+
+            com_rslt += bme280_set_filter(BME280_FILTER_COEFF_OFF);
+            if (com_rslt == SUCCESS)
+            {
+                com_rslt = bme280_get_forced_uncomp_pressure_temperature_humidity(
+                    &v_uncomp_pressure_s32, &v_uncomp_temperature_s32, &v_uncomp_humidity_s32);
+
+                if (com_rslt == SUCCESS)
+                {
+                    result.measure.temp = bme280_compensate_temperature_double(v_uncomp_temperature_s32);
+                    result.measure.pressure = bme280_compensate_pressure_double(v_uncomp_pressure_s32) / 100; // Pa -> hPa
+                    result.measure.humidity = bme280_compensate_humidity_double(v_uncomp_humidity_s32);
+                    ESP_LOGI(TAG_BME280, "%.2f degC / %.3f hPa / %.3f %%",
+                             result.measure.temp,
+                             result.measure.pressure,
+                             result.measure.humidity);
+                }
+                else
+                {
+                    ESP_LOGE(TAG_BME280, "measure error. code: %d", com_rslt);
+                }
+            }
+            else
+            {
+                ESP_LOGE(TAG_BME280, "init or setting error. code: %d", com_rslt);
+            }
+        }
     }
     else
     {
@@ -195,23 +275,40 @@ void app_main(void)
 
     ESP_ERROR_CHECK(i2c_del_master_bus(bus_handle));
 
-    ready_event_group = xEventGroupCreate();
+    // время сна
+    int sleeptime = get_menu_id("time");
+
+    if (get_charge() == 0)
+    {
+        xEventGroupSetBits(ready_event_group, NEED_TRANSMIT);
+    }
+    else
+    {
+        xEventGroupSetBits(ready_event_group, NOW_CHARGE);
+        // Будем просыпаться раз в минуту, для контроля зарядки
+        sleeptime = 1;
+    }
 
     xTaskCreate(modem_task, "modem_task", 1024 * 10, NULL, configMAX_PRIORITIES - 10, NULL);
 
-    //xTaskCreate(led_task, "led_task", 1024 * 5, NULL, configMAX_PRIORITIES - 15, NULL);
+    // xTaskCreate(led_task, "led_task", 1024 * 5, NULL, configMAX_PRIORITIES - 15, NULL);
 
-    xTaskCreate(btn_task, "btn_task", 1024 * 3, NULL, configMAX_PRIORITIES - 15, NULL);
+    xTaskCreate(btn_task, "btn_task", 1024 * 4, NULL, configMAX_PRIORITIES - 15, NULL);
 
     xTaskCreate(console_task, "console_task", 1024 * 10, NULL, configMAX_PRIORITIES - 15, NULL);
 
+    TaskHandle_t xHandleWifi = NULL;
+    xTaskCreate(wifi_task, "wifi_task", 1024 * 4, NULL, 5, &xHandleWifi);
+
+    EventBits_t uxBits;
+
     int wait = get_menu_id("waitnb");
 
-    EventBits_t uxBits = xEventGroupWaitBits(
-        ready_event_group, /* The event group being tested. */
-        END_RADIO_SLEEP,   /* The bits within the event group to wait for. */
-        pdFALSE,           /* BIT_0 & BIT_1 should be cleared before returning. */
-        pdTRUE,
+    uxBits = xEventGroupWaitBits(
+        ready_event_group,           /* The event group being tested. */
+        END_RADIO_SLEEP | WIFI_STOP, /* The bits within the event group to wait for. */
+        pdFALSE,                     /* BIT_0 & BIT_1 should be cleared before returning. */
+        pdTRUE,                      /* ОБА */
         wait * 60000 / portTICK_PERIOD_MS);
 
     xEventGroupSetBits(ready_event_group, END_WORK);
@@ -226,12 +323,15 @@ void app_main(void)
     // Light, Water
     dio_sleep();
 
-    int min = get_menu_id("time");
+    if (get_charge() == 1) // идет зарядка
+    {
+        sleeptime = 1;
+    }
 
-    uint64_t time_in_us = min * 60ULL * 1000000ULL;
+    uint64_t time_in_us = sleeptime * 60ULL * 1000000ULL;
 
     ESP_LOGW("main", "Go sleep: %lld us", time_in_us);
-    // ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout,0xffff));
+    //ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout,0xffff));
     fflush(stdout);
 
     esp_sleep_enable_timer_wakeup(time_in_us);

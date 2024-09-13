@@ -72,20 +72,26 @@ void dio_init()
     // set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
     // bit mask of the pins that you want to set
-    io_conf.pin_bit_mask = BIT64(PIN_WATER1) | BIT64(PIN_BATT_CONTROL);
+    io_conf.pin_bit_mask = BIT64(PIN_WATER1) | BIT64(PIN_CHARGE_CONTROL);
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     // configure GPIO with the given settings
     gpio_config(&io_conf);
 
     gpio_set_level(PIN_WATER1, 1);
-    gpio_set_level(PIN_BATT_CONTROL, 0);
+    gpio_set_level(PIN_CHARGE_CONTROL, 0);
 
     io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     gpio_config(&io_conf);
+
+    // gpio_set_level(PIN_CHARGE_CONTROL, 1);
+    // vTaskDelay(1);
+    // ESP_LOGI("Battery", "Charge 1 Pin[%d] Input: %d", PIN_BATT, gpio_get_level(PIN_BATT));
+    // gpio_set_level(PIN_CHARGE_CONTROL, 0);
+    // vTaskDelay(1);
 
     led_task_data_t led = {.set = 0, .xTicksToDelay = pdMS_TO_TICKS(2000)};
     led.red = 40 * gpio_get_level(PIN_LIGHT);
@@ -94,7 +100,7 @@ void dio_init()
 
     // ADC
     static int adc_raw;
-    const float kV = 815.0 / 3.37;
+    const float kV = get_menu_id("kbatt");
 
     adc_oneshot_unit_handle_t adc1_handle;
     adc_oneshot_unit_init_cfg_t init_config1 = {
@@ -112,6 +118,10 @@ void dio_init()
     unsigned int sum = 0;
 
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_BATT, &config));
+
+    gpio_pulldown_en(PIN_BATT);
+    vTaskDelay(1);
+
     sum = 0;
     for (int i = 0; i < count; i++)
     {
@@ -122,8 +132,6 @@ void dio_init()
     }
     result.measure.battery = sum / count / kV;
     ESP_LOGI("Battery", "ADC%d Channel[%d] AVG: %d, %.2f V", ADC_UNIT_1 + 1, PIN_BATT, sum / count, result.measure.battery);
-
-    gpio_reset_pin(PIN_BATT_CONTROL);
 
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_LIGHT, &config));
 
@@ -236,6 +244,7 @@ void dio_init()
         result.measure.water2 = sum / count;
         ESP_LOGI("Water", "ADC%d Channel[%d] AVG: %d, mode2 Pullup/Pulldown", ADC_UNIT_1 + 1, PIN_WATER2, sum / count);
 
+        io_conf.intr_type = GPIO_INTR_DISABLE;
         io_conf.mode = GPIO_MODE_OUTPUT;
         io_conf.pin_bit_mask = BIT64(PIN_WATER1);
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -244,43 +253,49 @@ void dio_init()
         gpio_set_level(PIN_WATER1, 1);
     }
 
-    io_conf.intr_type = GPIO_INTR_ANYEDGE;
-    io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    // io_conf.intr_type = GPIO_INTR_ANYEDGE;
+    io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2) | BIT64(PIN_BATT);
     // set as input mode
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     gpio_config(&io_conf);
 
-    gpio_isr_handler_add(PIN_LIGHT, gpio_isr_handler, (void *)PIN_LIGHT);
-    gpio_isr_handler_add(PIN_WATER2, gpio_isr_handler, (void *)PIN_WATER2);
+    // gpio_isr_handler_add(PIN_LIGHT, gpio_isr_handler, (void *)PIN_LIGHT);
+    // gpio_isr_handler_add(PIN_WATER2, gpio_isr_handler, (void *)PIN_WATER2);
+    // gpio_isr_handler_add(PIN_BATT, gpio_isr_handler, (void *)PIN_BATT);
+
+    ESP_LOGI("Battery", "Charge = %d", get_charge());
 }
+
+void stop_charge()
+{
+    gpio_set_level(PIN_CHARGE_CONTROL, 1);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+};
+
+int get_charge()
+{
+    return gpio_get_level(PIN_BATT);
+};
 
 void dio_sleep()
 {
 
-    ESP_LOGI("main", "Light: %d; Water: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER2));
+    ESP_LOGI("main", "Light: %d; Water: %d; Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER2), gpio_get_level(PIN_BATT));
 
     uint64_t wake_mask = 0;
     if (gpio_get_level(PIN_LIGHT) == 0)
         wake_mask |= BIT64(PIN_LIGHT);
+
     if (gpio_get_level(PIN_WATER2) == 0)
         wake_mask |= BIT64(PIN_WATER2);
 
-    // gpio_set_pull_mode(GPIO_NUM_2, GPIO_PULLDOWN_ONLY);
-    // gpio_set_pull_mode(GPIO_NUM_4, GPIO_PULLDOWN_ONLY);
-    // vTaskDelay(1000);
-
-    // ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER1));
-    //   ESP_ERROR_CHECK(gpio_sleep_set_pull_mode(GPIO_NUM_5, GPIO_PULLUP_ONLY));
-    //   ESP_ERROR_CHECK(gpio_sleep_set_direction(GPIO_NUM_5, GPIO_MODE_INPUT));
-
-    // esp_deep_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_ON);
+    if (gpio_get_level(PIN_BATT) == 0)
+        wake_mask |= BIT64(PIN_BATT);
 
     ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_HIGH));
-
-    // ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(BIT64(GPIO_NUM_2) | BIT64(GPIO_NUM_3), ESP_GPIO_WAKEUP_GPIO_HIGH));
-    // ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(BIT64(GPIO_NUM_2), ESP_GPIO_WAKEUP_GPIO_LOW));
 }
 
 void led_task(void *arg)
@@ -348,8 +363,12 @@ void btn_task(void *arg)
 
     int debounce = 0;
 
+    int output = 0;
+
     while (true)
     {
+        vTaskDelay(pdMS_TO_TICKS(20));
+
         if (gpio_get_level(PIN_BUTTON_BOOT) == 0)
         {
             debounce++;
@@ -368,9 +387,20 @@ void btn_task(void *arg)
             {
                 ESP_LOGI("IO", "Button short press!");
                 debounce = 0;
+
+                xEventGroupSetBits(ready_event_group, NEED_WIFI);
+
+                if (output == 0)
+                {
+                    // gpio_set_level(PIN_CHARGE_CONTROL, 1);
+                    output++;
+                }
+                else
+                {
+                    // gpio_set_level(PIN_CHARGE_CONTROL, 0);
+                    output = 0;
+                }
             };
         }
-
-        vTaskDelay(pdMS_TO_TICKS(20));
     }
 };

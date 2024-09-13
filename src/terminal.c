@@ -9,6 +9,8 @@
 
 uint8_t buffer[256];
 
+char printbuf[1024];
+
 static const char *TAG = "terminal";
 
 nvs_handle_t my_handle;
@@ -17,6 +19,8 @@ menu_t menu[] = {
     {.id = "id", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
     {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 10, .max = 100000},
     {.id = "waitnb", .name = "Ожидание окончания передачи", .izm = "мин", .val = 3, .min = 1, .max = 60},
+    {.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
+    {.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
 
 esp_err_t init_nvs()
@@ -81,9 +85,57 @@ int get_menu_id(const char *id)
     return 0;
 }
 
+esp_err_t set_menu_id(const char *id, int value)
+{
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
+    if (err == ESP_OK)
+    {
+        for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+        {
+            int l = strlen(menu[i].id);
+            if (strncmp(id, menu[i].id, l) == 0)
+            {
+                err = nvs_set_i32(my_handle, id, value);
+                menu[i].val = value;
+                break;
+            }
+        }
+    }
+    nvs_close(my_handle);
+    return err;
+}
+
+int get_menu_json(char *buf)
+{
+    int pos = 0;
+    buf[pos++] = '{';
+    for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+    {
+        pos += sprintf(&buf[pos], "\"%s\":[\"%s\",%li,\"%s\"]", menu[i].id, menu[i].name, menu[i].val, menu[i].izm);
+        if (i < sizeof(menu) / sizeof(menu_t) - 1)
+            buf[pos++] = ',';
+        else
+            buf[pos++] = '}';
+
+        buf[pos] = '\0';
+    }
+    return pos;
+}
+
+int get_menu_html(char *buf)
+{
+    int pos = 0;
+    pos += sprintf(&buf[pos], "<table>");
+    for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+    {
+        pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%li\"/>%s</td><tr>\n", menu[i].id, menu[i].name, menu[i].id, menu[i].id, menu[i].val, menu[i].izm);
+    }
+    pos += sprintf(&buf[pos], "</table>");
+    return pos;
+}
+
 void console_task(void *arg)
 {
-
     uint8_t *data = buffer;
 
     const uart_config_t uart_config = {
@@ -175,6 +227,8 @@ void console_task(void *arg)
                         strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
                         ESP_LOGI("result", "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%.0f,\"NBbatt\":%.3f,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f}", get_menu_id("id"), result.bootCount, datetime, result.measure.rssi, result.measure.nbbattery, result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity);
+                        get_menu_json(printbuf);
+                        ESP_LOGI("result", "%s", printbuf);
 
                         ESP_LOGI("menu", "-------------------------------------------");
                         for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
