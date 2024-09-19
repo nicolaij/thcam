@@ -6,6 +6,7 @@
 #include "driver/uart.h"
 #include "string.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 
 #include "freertos/queue.h"
 #include "driver/gptimer.h"
@@ -16,9 +17,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
-static const char *TAG = "DIO";
-
-gptimer_handle_t gptimer = NULL;
+// static const char *TAG = "DIO";
 
 #define QUEUE_LENGTH 1
 #define ITEM_SIZE sizeof(uint64_t)
@@ -30,19 +29,26 @@ QueueHandle_t xQueueLed = NULL;
 
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
-    BaseType_t xHigherPriorityTaskWoken;
+    /* xHigherPriorityTaskWoken must be set to pdFALSE before it is used. */
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-    // We have not woken a task at the start of the ISR.
-    xHigherPriorityTaskWoken = pdFALSE;
-    // xSemaphoreGiveFromISR(arg, &xHigherPriorityTaskWoken);
-    uint64_t t;
-    gptimer_get_raw_count(gptimer, &t);
+    uint32_t gpio_num = (uint32_t)arg;
 
-    xQueueSendFromISR(xQueue, &t, &xHigherPriorityTaskWoken);
-
-    if (xHigherPriorityTaskWoken)
+    if (gpio_num == PIN_BATT)
     {
-        portYIELD_FROM_ISR();
+        xEventGroupSetBitsFromISR(ready_event_group, NEED_WIFI, &xHigherPriorityTaskWoken);
+        xEventGroupSetBitsFromISR(ready_event_group, NOW_CHARGE, &xHigherPriorityTaskWoken);
+    }
+
+    if (xHigherPriorityTaskWoken == pdTRUE)
+    {
+        /* Writing to the queue caused a task to unblock and the unblocked task
+           has a priority higher than or equal to the priority of the currently
+           executing task (the task this interrupt interrupted). Perform a
+           context switch so this interrupt returns directly to the unblocked
+           task. */
+        portYIELD_FROM_ISR(); /* or portEND_SWITCHING_ISR() depending on the
+                                 port.*/
     }
 }
 
@@ -54,14 +60,8 @@ void dio_init()
 
     xQueueLed = xQueueCreate(2, sizeof(led_task_data_t));
 
-    ESP_LOGI(TAG, "Create timer handle");
-    gptimer_config_t timer_config = {
-        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
-        .direction = GPTIMER_COUNT_UP,
-        .resolution_hz = 40000000, // 40MHz
-    };
-    ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &gptimer));
-    ESP_ERROR_CHECK(gptimer_enable(gptimer));
+    // install gpio isr service
+    gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1);
 
     ESP_ERROR_CHECK(gpio_hold_dis(PIN_WATER1));
 
@@ -81,6 +81,16 @@ void dio_init()
     gpio_set_level(PIN_WATER1, 1);
     gpio_set_level(PIN_CHARGE_CONTROL, 0);
 
+    io_conf.intr_type = GPIO_INTR_POSEDGE;
+    io_conf.pin_bit_mask = BIT64(PIN_BATT);
+    // set as input mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    gpio_config(&io_conf);
+    gpio_isr_handler_add(PIN_BATT, gpio_isr_handler, (void *)PIN_BATT);
+
+    io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -100,7 +110,7 @@ void dio_init()
 
     // ADC
     static int adc_raw;
-    const float kV = get_menu_id("kbatt");
+    // const float kV = get_menu_id("kbatt");
 
     adc_oneshot_unit_handle_t adc1_handle;
     adc_oneshot_unit_init_cfg_t init_config1 = {
@@ -116,23 +126,23 @@ void dio_init()
 
     const int count = 5;
     unsigned int sum = 0;
+    /*
+        ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_BATT, &config));
 
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_BATT, &config));
-
-    gpio_pulldown_en(PIN_BATT);
-    vTaskDelay(1);
-
-    sum = 0;
-    for (int i = 0; i < count; i++)
-    {
-        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_BATT, &adc_raw));
-        sum = sum + adc_raw;
-        ESP_LOGD("Battery", "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, PIN_BATT, adc_raw);
+        gpio_pulldown_en(PIN_BATT);
         vTaskDelay(1);
-    }
-    result.measure.battery = sum / count / kV;
-    ESP_LOGI("Battery", "ADC%d Channel[%d] AVG: %d, %.2f V", ADC_UNIT_1 + 1, PIN_BATT, sum / count, result.measure.battery);
 
+        sum = 0;
+        for (int i = 0; i < count; i++)
+        {
+            ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_BATT, &adc_raw));
+            sum = sum + adc_raw;
+            ESP_LOGD("Battery", "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, PIN_BATT, adc_raw);
+            vTaskDelay(1);
+        }
+        result.measure.battery = sum / count / kV;
+        ESP_LOGI("Battery", "ADC%d Channel[%d] AVG: %d, %.2f V", ADC_UNIT_1 + 1, PIN_BATT, sum / count, result.measure.battery);
+    */
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_LIGHT, &config));
 
     sum = 0;
@@ -157,9 +167,6 @@ void dio_init()
     }
     result.measure.water = sum / count;
     ESP_LOGI("Water", "ADC%d Channel[%d] AVG: %d, mode1 +3.3", ADC_UNIT_1 + 1, PIN_WATER2, sum / count);
-
-    // install gpio isr service
-    gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1);
 
     // измерение dt0, dt1 воды
     /*
@@ -255,7 +262,7 @@ void dio_init()
 
     io_conf.intr_type = GPIO_INTR_DISABLE;
     // io_conf.intr_type = GPIO_INTR_ANYEDGE;
-    io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2) | BIT64(PIN_BATT);
+    io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
     // set as input mode
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -264,7 +271,6 @@ void dio_init()
 
     // gpio_isr_handler_add(PIN_LIGHT, gpio_isr_handler, (void *)PIN_LIGHT);
     // gpio_isr_handler_add(PIN_WATER2, gpio_isr_handler, (void *)PIN_WATER2);
-    // gpio_isr_handler_add(PIN_BATT, gpio_isr_handler, (void *)PIN_BATT);
 
     ESP_LOGI("Battery", "Charge = %d", get_charge());
 }
@@ -282,6 +288,8 @@ int get_charge()
 
 void dio_sleep()
 {
+
+    // ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER1));
 
     ESP_LOGI("main", "Light: %d; Water: %d; Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER2), gpio_get_level(PIN_BATT));
 
@@ -365,6 +373,11 @@ void btn_task(void *arg)
 
     int output = 0;
 
+    const int short_count = 4;
+    const int long_count = 50;
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+
     while (true)
     {
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -376,14 +389,16 @@ void btn_task(void *arg)
         else
         {
             if (debounce > 0)
+            {
                 debounce--;
+            }
 
-            if (debounce > 50) // долгое нажатие
+            if (debounce > long_count) // долгое нажатие
             {
                 ESP_LOGI("IO", "Button long press!");
                 debounce = 0;
             }
-            else if (debounce > 5) // короткое нажатие
+            else if (debounce > short_count) // короткое нажатие
             {
                 ESP_LOGI("IO", "Button short press!");
                 debounce = 0;

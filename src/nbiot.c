@@ -14,6 +14,9 @@ static const int RX_BUF_SIZE = 1024;
 static const int TX_BUF_SIZE = 512;
 static const char *TAG = "NBIoT";
 
+char pdp_ip[20];
+char net_status_current[32];
+
 esp_err_t print_atcmd(const char *cmd, char *buffer)
 {
     int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
@@ -157,8 +160,6 @@ esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *res
 
 /*
  Send Data to Remote Via Socket With Data Mode
-cmd "AT+CSOSEND=0"
-data "Hello World!!!"
 */
 esp_err_t at_csosend(int socket, char *data, char *buffer)
 {
@@ -242,13 +243,15 @@ void modem_task(void *arg)
 
     EventBits_t uxBits;
 
+    strcpy(net_status_current, "OFF");
+
     while (1)
     {
         /* Ждем необходимости запуска передачи, либо зарядка*/
         uxBits = xEventGroupWaitBits(
             ready_event_group,          /* The event group being tested. */
             NEED_TRANSMIT | NOW_CHARGE, /* The bits within the event group to wait for. */
-            pdTRUE,                     /* BIT_0 & BIT_1 should be cleared before returning. */
+            pdFALSE,                    /* BIT_0 & BIT_1 should be cleared before returning. */
             pdFALSE,                    /* Don't wait for both bits, either bit will do. */
             portMAX_DELAY);
 
@@ -269,6 +272,9 @@ void modem_task(void *arg)
                 continue;
             }
 
+            if (strnstr(net_status_current, "Error", sizeof(net_status_current)) == NULL) // Если ошибка SIM - то не перезаписываем ее
+                strcpy(net_status_current, "Check SIM...");
+
             ee = at_reply_wait("ATE1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
 
             // Battery Charge
@@ -286,6 +292,7 @@ void modem_task(void *arg)
                 if (cbc[1] >= get_menu_id("ubatt"))
                 {
                     ESP_LOGI(TAG, "Charge complete");
+                    xEventGroupSetBits(ready_event_group, CHARGE_COMPLETE);
                     stop_charge();
 
                     if (get_charge() == 0)
@@ -311,7 +318,6 @@ void modem_task(void *arg)
             // Reset and Set Phone Functionality
             if ((try_counter % 5) == 0) // if fail restart sim
             {
-
                 if (try_counter == 10)
                 {
                     // STOP
@@ -329,6 +335,8 @@ void modem_task(void *arg)
             ee = at_reply_wait("AT+CPIN?\r\n", "CPIN: READY", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
+                strcpy(net_status_current, "SIM Error!");
+                result.measure.d_nbiot_sim_error = true;
                 try_counter++;
                 ESP_LOGW(TAG, "CPIN:\n%s", data);
                 vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -338,6 +346,9 @@ void modem_task(void *arg)
             {
                 ESP_LOGI(TAG, "PIN OK");
             }
+
+            result.measure.d_nbiot_sim_error = false;
+            strcpy(net_status_current, "Network search...");
 
             // Network Registration Status
             int try_network = 500;
@@ -458,7 +469,6 @@ void modem_task(void *arg)
             strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
             // Show the Complete PDP Address
-            char pdp_ip[20];
             ee = at_reply_wait("AT+IPCONFIG\r\n", "IPCONFIG:", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
@@ -527,6 +537,9 @@ void modem_task(void *arg)
             //Send TCP data out
             AT+CSOCL=0 //Close socket
             */
+
+            strcpy(net_status_current, "Send data...");
+
             ee = at_reply_wait_OK("AT+CSOSENDFLAG=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 
             int socket = 0;
@@ -543,7 +556,10 @@ void modem_task(void *arg)
 
                 ESP_LOGI(TAG, "Socket %i connect...", socket);
 
-                snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,48885,\"10.179.40.20\"\r\n", socket);
+                int port = get_menu_id("tcpport");
+                int ip = get_menu_id("ip");
+
+                snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,%i,\"%i.%i.%i.%i\"\r\n", socket, port, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
 
                 try_counter = 3;
                 while (try_counter)
@@ -557,13 +573,15 @@ void modem_task(void *arg)
                     {
 
                         // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
-                        snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
+                        // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
+                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_id("id"), result.bootCount, datetime, result.measure.rssi, result.measure.nbbattery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure, result.measure.discrete);
 
                         ESP_LOGI(TAG, "Send...");
 
                         ee = at_csosend(socket, send_data, (char *)data);
                         if (ee == ESP_OK)
                         {
+                            result.measure.d_nbiot_send_succes = true;
                             break;
                         }
 
@@ -583,14 +601,19 @@ void modem_task(void *arg)
         }
 
         // если есть бит END_WORK - то модуль уже выключили из main()
-        uxBits = xEventGroupGetBits(ready_event_group);
-        if ((uxBits & END_WORK) == 0)
+        if ((xEventGroupGetBits(ready_event_group) & END_WORK) == 0)
         {
             print_atcmd("AT+CPOWD=1\r\n", data);
+            strcpy(net_status_current, "Success OFF");
             // print_atcmd("AT+CFUN=0\r\n", data);
+        }
+        else
+        {
+            strcpy(net_status_current, "Extern OFF");
         }
 
         xEventGroupSetBits(ready_event_group, END_RADIO_SLEEP);
+        xEventGroupClearBits(ready_event_group, NEED_TRANSMIT | NOW_CHARGE);
     }
 }
 

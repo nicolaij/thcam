@@ -18,9 +18,11 @@ nvs_handle_t my_handle;
 menu_t menu[] = {
     {.id = "id", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
     {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 10, .max = 100000},
-    {.id = "waitnb", .name = "Ожидание окончания передачи", .izm = "мин", .val = 3, .min = 1, .max = 60},
+    {.id = "waitnb", .name = "Ожидание NB-IoT, WiFi", .izm = "мин", .val = 3, .min = 1, .max = 60},
     {.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
-    {.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
+    {.id = "ip", .name = "IP сервера", .izm = "", .val = ((10 << 24) | (179 << 16) | (40 << 8) | (20)), .min = INT32_MIN, .max = INT32_MAX},
+    {.id = "tcpport", .name = "TCP порт сервера", .izm = "", .val = 48885, .min = 0, .max = 65535},
+    //{.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
 
 esp_err_t init_nvs()
@@ -130,7 +132,8 @@ int get_menu_html(char *buf)
     {
         pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%li\"/>%s</td><tr>\n", menu[i].id, menu[i].name, menu[i].id, menu[i].id, menu[i].val, menu[i].izm);
     }
-    pos += sprintf(&buf[pos], "</table>");
+    pos += sprintf(&buf[pos], "</table><br>");
+
     return pos;
 }
 
@@ -220,21 +223,44 @@ void console_task(void *arg)
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = n;
                     }
+                    else if (n == sizeof(menu) / sizeof(menu_t) + 1) // выводим историю
+                    {
+                        int pos = bootCount % HISTORY_SIZE;
+                        int end = 0;
+                        ESP_LOGI("menu", "-------------------------------------------");
+
+                        while (pos > end)
+                        {
+                            ESP_LOGI("menu", "%3i: " OUT_MEASURE_FORMATS, pos, OUT_MEASURE_VARS(history[pos]));
+                            pos--;
+                            if (pos == 0 && bootCount > (bootCount % HISTORY_SIZE))
+                            {
+                                pos = HISTORY_SIZE - 1;
+                                end = (bootCount % HISTORY_SIZE);
+                            }
+                        }
+
+                        ESP_LOGI("menu", "-------------------------------------------");
+                        enter_value = 0;
+                    }
                     else
                     {
                         char datetime[24];
                         struct tm *localtm = localtime(&result.ttime);
                         strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
-                        ESP_LOGI("result", "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%.0f,\"NBbatt\":%.3f,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f}", get_menu_id("id"), result.bootCount, datetime, result.measure.rssi, result.measure.nbbattery, result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity);
-                        get_menu_json(printbuf);
-                        ESP_LOGI("result", "%s", printbuf);
+                        ESP_LOGI("result", OUT_JSON, get_menu_id("id"), result.bootCount, datetime, OUT_MEASURE_VARS(result.measure));
+                        // get_menu_json(printbuf);
+                        // ESP_LOGI("result", "%s", printbuf);
 
                         ESP_LOGI("menu", "-------------------------------------------");
-                        for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+                        int i = 0;
+                        for (i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
                         {
                             ESP_LOGI("menu", "%2i. %s: %li %s", i + 1, menu[i].name, menu[i].val, menu[i].izm);
                         }
+                        ESP_LOGI("menu", "%2i. История: %i", i + 1, bootCount);
+
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = 0;
                     }

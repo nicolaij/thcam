@@ -26,7 +26,9 @@
 #include "esp_spiffs.h"
 
 extern uint8_t mac[6];
-extern char modem_status[128];
+extern char pdp_ip[20];
+extern char net_status_current[32];
+extern RTC_DATA_ATTR result_data_t old_result;
 
 #define CLIENT_WIFI_SSID "ap1"
 #define CLIENT_WIFI_PASS "123123123"
@@ -303,9 +305,42 @@ static esp_err_t download_get_handler(httpd_req_t *req)
 
 static esp_err_t menu_get_handler(httpd_req_t *req)
 {
-    reset_sleep_timeout();
-    int l = get_menu_html(buf);
-    httpd_resp_send(req, buf, l);
+    int l = 0;
+    char datetime[24];
+    struct tm *localtm = localtime(&result.ttime);
+    strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), result.bootCount, datetime, OUT_MEASURE_VARS(result.measure));
+
+    localtm = localtime(&old_result.ttime);
+    strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>PREVIOUS DATA = ");
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), old_result.bootCount, datetime, OUT_MEASURE_VARS(old_result.measure));
+
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>STATUS = ");
+
+    if (xEventGroupGetBits(ready_event_group) & NOW_CHARGE || get_charge() == 1)
+    {
+        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>charge... <b>");
+    }
+
+    if (xEventGroupGetBits(ready_event_group) & CHARGE_COMPLETE)
+    {
+        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>Charge complete <b>");
+    }
+
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "NB-IoT: <b>%s</b> ", net_status_current);
+
+    if (strlen(pdp_ip) > 0)
+        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "IP: %s", pdp_ip);
+
+    httpd_resp_send_chunk(req, buf, l);
+
+    l = get_menu_html(buf);
+    httpd_resp_send_chunk(req, buf, l);
+
+    httpd_resp_sendstr_chunk(req, NULL);
+
     return ESP_OK;
 }
 
@@ -486,6 +521,20 @@ static const httpd_uri_t menu_page = {
     .user_ctx = &((down_data_t){.filepath = "/spiffs/main.html", .content = "text/html"}),
 };
 
+static const httpd_uri_t data_page = {
+    .uri = "/" DATAFILE,
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/" DATAFILE, .content = "text/csv"}),
+};
+
+static const httpd_uri_t olddata_page = {
+    .uri = "/old" DATAFILE,
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/old" DATAFILE, .content = "text/csv"}),
+};
+
 static const httpd_uri_t menu_post = {
     .uri = "/",
     .method = HTTP_POST,
@@ -531,6 +580,8 @@ static httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &update_post);
         httpd_register_uri_handler(server, &update_get);
 
+        httpd_register_uri_handler(server, &data_page);
+        httpd_register_uri_handler(server, &olddata_page);
         return server;
     }
 
@@ -540,46 +591,6 @@ static httpd_handle_t start_webserver(void)
 
 void wifi_task(void *arg)
 {
-
-    ESP_LOGI("SPIFFS", "Initializing SPIFFS");
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = "/spiffs",
-        .partition_label = NULL,
-        .max_files = 5,
-        .format_if_mount_failed = true};
-
-    // Use settings defined above to initialize and mount SPIFFS filesystem.
-    // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
-
-    if (ret != ESP_OK)
-    {
-        if (ret == ESP_FAIL)
-        {
-            ESP_LOGE("SPIFFS", "Failed to mount or format filesystem");
-        }
-        else if (ret == ESP_ERR_NOT_FOUND)
-        {
-            ESP_LOGE("SPIFFS", "Failed to find SPIFFS partition");
-        }
-        else
-        {
-            ESP_LOGE("SPIFFS", "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
-        }
-    }
-
-    size_t total = 0, used = 0;
-    ret = esp_spiffs_info(conf.partition_label, &total, &used);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE("SPIFFS", "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
-    }
-    else
-    {
-        ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
-    }
-
-    xEventGroupSetBits(ready_event_group, WIFI_STOP);
 
     xEventGroupWaitBits(
         ready_event_group, /* The event group being tested. */
@@ -591,7 +602,7 @@ void wifi_task(void *arg)
     xEventGroupClearBits(ready_event_group, WIFI_STOP);
 
     s_wifi_event_group = xEventGroupCreate();
-    
+
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -623,7 +634,6 @@ void wifi_task(void *arg)
         if (uxBits & END_WORK)
         {
             esp_wifi_stop();
-//            xEventGroupSetBits(ready_event_group, END_WIFI);
         }
 
         if (restart == true)

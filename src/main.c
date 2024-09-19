@@ -6,6 +6,9 @@
 #include "esp_sleep.h"
 #include "esp_mac.h"
 
+#include "esp_spiffs.h"
+#include "sys/stat.h"
+
 #include "driver/i2c_master.h"
 i2c_master_dev_handle_t dev_handle;
 
@@ -25,7 +28,9 @@ uint8_t mac[6];
 
 result_data_t result;
 
-RTC_DATA_ATTR measure_data_t old_measure;
+RTC_DATA_ATTR result_data_t old_result;
+
+RTC_DATA_ATTR measure_data_t history[HISTORY_SIZE];
 
 EventGroupHandle_t ready_event_group;
 
@@ -33,6 +38,7 @@ char buf[40];
 
 void app_main(void)
 {
+
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
 
     ready_event_group = xEventGroupCreate();
@@ -71,10 +77,13 @@ void app_main(void)
             {
                 result.measure.d_charge = true;
                 xEventGroupSetBits(ready_event_group, NEED_WIFI);
+                xEventGroupSetBits(ready_event_group, NOW_CHARGE);
             }
+
             if (pin == PIN_LIGHT)
                 result.measure.d_light = true;
-            if (pin == PIN_WATER1)
+
+            if (pin == PIN_WATER2)
                 result.measure.d_water = true;
         }
         else
@@ -131,8 +140,7 @@ void app_main(void)
     ESP_ERROR_CHECK(temperature_sensor_disable(temp_sensor));
     ESP_ERROR_CHECK(temperature_sensor_uninstall(temp_sensor));
 
-    int l = snprintf((char *)buf, sizeof(buf), "Temperature:  %.01f°C", result.measure.internal_temp);
-    ESP_LOGI("temperature_sensor", "%s", buf);
+    ESP_LOGI("temperature_sensor", "Internal temperature:  %.01f°C", result.measure.internal_temp);
 
     // i2c
     i2c_master_bus_config_t i2c_mst_config = {
@@ -270,24 +278,61 @@ void app_main(void)
     {
         ESP_LOGE(TAG, "I2C sensor error!");
     }
-
     // ESP_ERROR_CHECK(i2c_master_bus_rm_device(dev_handle));
-
     ESP_ERROR_CHECK(i2c_del_master_bus(bus_handle));
 
-    // время сна
+    ESP_LOGI("SPIFFS", "Initializing SPIFFS");
+    esp_vfs_spiffs_conf_t spiffsconf = {
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true};
+
+    // Use settings defined above to initialize and mount SPIFFS filesystem.
+    // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
+    esp_err_t ret = esp_vfs_spiffs_register(&spiffsconf);
+
+    if (ret != ESP_OK)
+    {
+        if (ret == ESP_FAIL)
+        {
+            ESP_LOGE("SPIFFS", "Failed to mount or format filesystem");
+        }
+        else if (ret == ESP_ERR_NOT_FOUND)
+        {
+            ESP_LOGE("SPIFFS", "Failed to find SPIFFS partition");
+        }
+        else
+        {
+            ESP_LOGE("SPIFFS", "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+    }
+
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(spiffsconf.partition_label, &total, &used);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE("SPIFFS", "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    }
+    else
+    {
+        ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
+    }
+
+    history[bootCount % HISTORY_SIZE] = result.measure;
+
+    // время сна в мин
     int sleeptime = get_menu_id("time");
 
     if (get_charge() == 0)
     {
         xEventGroupSetBits(ready_event_group, NEED_TRANSMIT);
     }
-    else
-    {
-        xEventGroupSetBits(ready_event_group, NOW_CHARGE);
-        // Будем просыпаться раз в минуту, для контроля зарядки
+
+    if (xEventGroupGetBits(ready_event_group) & NOW_CHARGE)
         sleeptime = 1;
-    }
+
+    xEventGroupSetBits(ready_event_group, WIFI_STOP);
 
     xTaskCreate(modem_task, "modem_task", 1024 * 10, NULL, configMAX_PRIORITIES - 10, NULL);
 
@@ -311,6 +356,43 @@ void app_main(void)
         pdTRUE,                      /* ОБА */
         wait * 60000 / portTICK_PERIOD_MS);
 
+    old_result = result;
+
+    history[bootCount % HISTORY_SIZE] = result.measure;
+
+    // Сохраняем файл
+    const char *filepath = "/spiffs/" DATAFILE;
+    FILE *fd = NULL;
+    struct stat file_stat;
+
+    if (stat(filepath, &file_stat) == -1)
+    {
+        fd = fopen(filepath, "w");
+        fprintf(fd, "BootCounter, ttime, " OUT_MEASURE_HEADERS "\n");
+        fclose(fd);
+    }
+
+    fd = fopen(filepath, "a+");
+    if (fprintf(fd, "%4i, %10lli, " OUT_MEASURE_FORMATS "\n", bootCount, result.ttime, OUT_MEASURE_VARS(result.measure)) > 0)
+    {
+        ESP_LOGI("main", "Save \"%s\" successful", filepath);
+    }
+    else
+    {
+        ESP_LOGW("main", "Save \"%s\" error!", filepath);
+    }
+    fclose(fd);
+
+    if ((uxBits & WIFI_STOP) == 0)
+    {
+        uxBits = xEventGroupWaitBits(
+            ready_event_group, /* The event group being tested. */
+            WIFI_STOP,         /* The bits within the event group to wait for. */
+            pdFALSE,           /* BIT_0 & BIT_1 should be cleared before returning. */
+            pdFALSE,           /* ОБА */
+            wait * 60000 / portTICK_PERIOD_MS);
+    }
+
     xEventGroupSetBits(ready_event_group, END_WORK);
 
     // если модуль nbiot не выключился - то выключаем принудительно
@@ -320,18 +402,22 @@ void app_main(void)
         nbiot_power_pin(2000 / portTICK_PERIOD_MS);
     }
 
+    if (file_stat.st_size > 200000)
+    {
+        remove("/spiffs/old" DATAFILE);
+        rename(filepath, "/spiffs/old" DATAFILE);
+    }
+
     // Light, Water
     dio_sleep();
 
-    if (get_charge() == 1) // идет зарядка
-    {
+    if (xEventGroupGetBits(ready_event_group) & NOW_CHARGE || get_charge() == 1)
         sleeptime = 1;
-    }
 
     uint64_t time_in_us = sleeptime * 60ULL * 1000000ULL;
 
-    ESP_LOGW("main", "Go sleep: %lld us", time_in_us);
-    //ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout,0xffff));
+    ESP_LOGW("main", "Go sleep: %lld min", time_in_us / 60ULL / 1000000ULL);
+    // ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout,0xffff));
     fflush(stdout);
 
     esp_sleep_enable_timer_wakeup(time_in_us);
