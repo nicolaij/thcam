@@ -360,28 +360,33 @@ void app_main(void)
 
     history[bootCount % HISTORY_SIZE] = result.measure;
 
-    // Сохраняем файл
     const char *filepath = "/spiffs/" DATAFILE;
     FILE *fd = NULL;
-    struct stat file_stat;
+    struct stat file_stat = {.st_size = 0};
 
-    if (stat(filepath, &file_stat) == -1)
+    int maxfilesize = get_menu_id("filesize");
+    // Сохраняем файл
+    if (maxfilesize > 0)
     {
-        fd = fopen(filepath, "w");
-        fprintf(fd, "BootCounter, ttime, " OUT_MEASURE_HEADERS "\n");
+
+        if (stat(filepath, &file_stat) == -1)
+        {
+            fd = fopen(filepath, "w");
+            fprintf(fd, "BootCounter, ttime, " OUT_MEASURE_HEADERS "\n");
+            fclose(fd);
+        }
+
+        fd = fopen(filepath, "a+");
+        if (fprintf(fd, "%4i, %10lli, " OUT_MEASURE_FORMATS "\n", bootCount, result.ttime, OUT_MEASURE_VARS(result.measure)) > 0)
+        {
+            ESP_LOGI("main", "Save \"%s\" successful", filepath);
+        }
+        else
+        {
+            ESP_LOGW("main", "Save \"%s\" error!", filepath);
+        }
         fclose(fd);
     }
-
-    fd = fopen(filepath, "a+");
-    if (fprintf(fd, "%4i, %10lli, " OUT_MEASURE_FORMATS "\n", bootCount, result.ttime, OUT_MEASURE_VARS(result.measure)) > 0)
-    {
-        ESP_LOGI("main", "Save \"%s\" successful", filepath);
-    }
-    else
-    {
-        ESP_LOGW("main", "Save \"%s\" error!", filepath);
-    }
-    fclose(fd);
 
     if ((uxBits & WIFI_STOP) == 0)
     {
@@ -402,7 +407,7 @@ void app_main(void)
         nbiot_power_pin(2000 / portTICK_PERIOD_MS);
     }
 
-    if (file_stat.st_size > 200000)
+    if (maxfilesize > 0 && file_stat.st_size > (maxfilesize * 1024))
     {
         remove("/spiffs/old" DATAFILE);
         rename(filepath, "/spiffs/old" DATAFILE);

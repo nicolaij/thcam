@@ -392,7 +392,7 @@ void modem_task(void *arg)
             else
             {
                 int dt[] = {0, 0, 0, 0, 0, 0, 0, 0};
-                char *pdata = strstr((const char *)data, "CCLK:");
+                const char *pdata = strstr((const char *)data, "CCLK:");
 
                 //+CCLK: 24/04/30,07:49:36+12
                 char *s = strchr(pdata, ' ');
@@ -460,7 +460,8 @@ void modem_task(void *arg)
                 time_t t = mktime(&tm) + dt[6] * 3600; // UNIX time + timezone offset
                 struct timeval now = {.tv_sec = t};
                 settimeofday(&now, NULL);
-                ESP_LOGI(TAG, "Set date and time: %s", asctime(&tm));
+                strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", &tm);
+                ESP_LOGI(TAG, "Set date and time: %s", datetime);
             }
 
             // get current date time
@@ -477,7 +478,7 @@ void modem_task(void *arg)
             }
             else
             {
-                char *pdata = strstr((const char *)data, "IPCONFIG:");
+                const char *pdata = strstr((const char *)data, "IPCONFIG:");
                 char *s = strchr(pdata, ' ');
                 if (s)
                 {
@@ -551,7 +552,7 @@ void modem_task(void *arg)
             }
             else
             {
-                char *pdata = strstr((const char *)data, "CSOC: ");
+                const char *pdata = strstr((const char *)data, "CSOC: ");
                 socket = atoi(pdata + 6);
 
                 ESP_LOGI(TAG, "Socket %i connect...", socket);

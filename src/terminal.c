@@ -22,6 +22,7 @@ menu_t menu[] = {
     {.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
     {.id = "ip", .name = "IP сервера", .izm = "", .val = ((10 << 24) | (179 << 16) | (40 << 8) | (20)), .min = INT32_MIN, .max = INT32_MAX},
     {.id = "tcpport", .name = "TCP порт сервера", .izm = "", .val = 48885, .min = 0, .max = 65535},
+    {.id = "filesize", .name = "Макс. размер файла /data.csv", .izm = "кБ", .val = 192, .min = 0, .max = 200},
     //{.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
 
