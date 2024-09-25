@@ -36,6 +36,8 @@ EventGroupHandle_t ready_event_group;
 
 char buf[40];
 
+TaskHandle_t xHandleNB = NULL;
+
 void app_main(void)
 {
 
@@ -334,7 +336,7 @@ void app_main(void)
 
     xEventGroupSetBits(ready_event_group, WIFI_STOP);
 
-    xTaskCreate(modem_task, "modem_task", 1024 * 10, NULL, configMAX_PRIORITIES - 10, NULL);
+    xTaskCreate(modem_task, "modem_task", 1024 * 10, NULL, configMAX_PRIORITIES - 10, &xHandleNB);
 
     // xTaskCreate(led_task, "led_task", 1024 * 5, NULL, configMAX_PRIORITIES - 15, NULL);
 
@@ -356,6 +358,19 @@ void app_main(void)
         pdTRUE,                      /* ОБА */
         wait * 60000 / portTICK_PERIOD_MS);
 
+    if (uxBits & NBTERMINAL_ACTIVE)
+        while (xEventGroupWaitBits(
+                   ready_event_group, /* The event group being tested. */
+                   NBTERMINAL_ACTIVE, /* The bits within the event group to wait for. */
+                   pdTRUE,            /* BIT_0 & BIT_1 should be cleared before returning. */
+                   pdFALSE,           /* ОБА */
+                   1 * 60000 / portTICK_PERIOD_MS) &
+               NBTERMINAL_ACTIVE)
+        {
+            // NBTERMINAL_ACTIVE = 1, ждем 1 мин
+            vTaskDelay(60000 / portTICK_PERIOD_MS);
+        }
+
     old_result = result;
 
     history[bootCount % HISTORY_SIZE] = result.measure;
@@ -368,7 +383,6 @@ void app_main(void)
     // Сохраняем файл
     if (maxfilesize > 0)
     {
-
         if (stat(filepath, &file_stat) == -1)
         {
             fd = fopen(filepath, "w");

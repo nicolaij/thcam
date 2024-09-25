@@ -17,6 +17,8 @@ static const char *TAG = "NBIoT";
 char pdp_ip[20];
 char net_status_current[32];
 
+RTC_DATA_ATTR bool run_once = false;
+
 esp_err_t print_atcmd(const char *cmd, char *buffer)
 {
     int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
@@ -272,6 +274,12 @@ void modem_task(void *arg)
                 continue;
             }
 
+            // если запускаем терминал - стоп работа с модулем
+            while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+            {
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
+
             if (strnstr(net_status_current, "Error", sizeof(net_status_current)) == NULL) // Если ошибка SIM - то не перезаписываем ее
                 strcpy(net_status_current, "Check SIM...");
 
@@ -370,6 +378,12 @@ void modem_task(void *arg)
                     }
                 }
                 try_network--;
+
+                // если запускаем терминал - стоп работа с модулем
+                while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+                {
+                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+                }
             }
 
             // Signal Quality Report
@@ -383,6 +397,14 @@ void modem_task(void *arg)
             }
 
             // Clock
+            if (run_once == false)
+            {
+                // AT+CURTC? AT+CTZR?
+                // ee = at_reply_wait_OK("AT+CTZR=?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                ee = at_reply_wait_OK("AT+CURTC=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                ee = at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                run_once = true;
+            }
             ee = at_reply_wait("AT+CCLK?\r\n", "CCLK:", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
@@ -400,7 +422,7 @@ void modem_task(void *arg)
                 {
                     // year
                     dt[0] = atoi(s + 1);
-                    if (dt[0] > 0 && dt[0] < 100)
+                    if (dt[0] >= 0 && dt[0] < 100)
                         dt[0] = dt[0] + 2000;
                     s = strchr(s + 1, '/');
                     if (s)
@@ -469,6 +491,8 @@ void modem_task(void *arg)
             struct tm *localtm = localtime(&result.ttime);
             strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
+            // ee = at_reply_wait_OK("AT+CTZU?\r\n", (char *)data, 10000 / portTICK_PERIOD_MS);
+
             // Show the Complete PDP Address
             ee = at_reply_wait("AT+IPCONFIG\r\n", "IPCONFIG:", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
@@ -503,6 +527,12 @@ void modem_task(void *arg)
                     ESP_LOGI(TAG, "IP: %s", pdp_ip);
                 }
             };
+
+            // если запускаем терминал - стоп работа с модулем
+            while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+            {
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
 
             /*
                     //ping
@@ -560,19 +590,27 @@ void modem_task(void *arg)
                 int port = get_menu_id("tcpport");
                 int ip = get_menu_id("ip");
 
-                snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,%i,\"%i.%i.%i.%i\"\r\n", socket, port, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
-
                 try_counter = 3;
                 while (try_counter)
                 {
+                    snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,%i,\"%i.%i.%i.%i\"\r\n", socket, port, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
                     ee = at_reply_wait_OK(send_data, (char *)data, 60000 / portTICK_PERIOD_MS);
                     if (ee != ESP_OK)
                     {
                         ESP_LOGW(TAG, "AT+CSOCON:%s", data);
+                        /* ping
+                            // AT+CIPPING
+                            snprintf(send_data, sizeof(send_data), "AT+CIPPING=\"%i.%i.%i.%i\"\r\n", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
+                            ee = at_reply_wait(send_data, "CIPPING", (char *)data, 40000 / portTICK_PERIOD_MS);
+                            if (ee != ESP_OK)
+                            {
+                                ESP_LOGW(TAG, "AT+CIPPING:%s", data);
+                                vTaskDelay(3000 / portTICK_PERIOD_MS);
+                            }
+                        */
                     }
                     else
                     {
-
                         // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
                         // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
                         snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_id("id"), result.bootCount, datetime, result.measure.rssi, result.measure.nbbattery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure, result.measure.discrete);
@@ -590,6 +628,12 @@ void modem_task(void *arg)
                     }
                     vTaskDelay(2000 / portTICK_PERIOD_MS);
                     try_counter--;
+
+                    // если запускаем терминал - стоп работа с модулем
+                    while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+                    {
+                        vTaskDelay(1000 / portTICK_PERIOD_MS);
+                    }
                 }
 
                 // wait to transmit
@@ -599,6 +643,12 @@ void modem_task(void *arg)
             snprintf(send_data, sizeof(send_data), "AT+CSOCL=%i\r\n", socket);
             at_reply_wait_OK(send_data, (char *)data, 1000 / portTICK_PERIOD_MS); // CLOSE socket
             break;
+        }
+
+        // если запускаем терминал - стоп работа с модулем
+        while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+        {
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
         // если есть бит END_WORK - то модуль уже выключили из main()

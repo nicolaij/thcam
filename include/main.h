@@ -24,6 +24,8 @@
 #define NEED_TRANSMIT BIT5
 #define NEED_WIFI BIT6
 #define CHARGE_COMPLETE BIT7
+#define NBTERMINAL_ACTIVE BIT8
+#define NB_STOP BIT9
 
 extern EventGroupHandle_t ready_event_group;
 
@@ -46,6 +48,9 @@ void stop_charge();
 int get_charge();
 
 void nbiot_power_pin(const TickType_t xTicksToDelay);
+
+esp_err_t print_atcmd(const char *cmd, char *buffer);
+
 
 typedef struct
 {

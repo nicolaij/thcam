@@ -1,0 +1,12 @@
+2024-09-23 10:15:56,268 [INFO ] TCP/UDP server is running
+2024-09-23 10:15:56,268 [DEBUG] New: <socket.socket fd=392, family=2, type=1, proto=0, laddr=('172.30.239.20', 48885)>
+2024-09-23 10:15:56,269 [DEBUG] New: <socket.socket fd=340, family=2, type=2, proto=0, laddr=('172.30.239.20', 48885)>
+2024-09-23 11:32:30,726 [INFO ] TCP/UDP server is running
+2024-09-23 11:32:30,726 [DEBUG] New: <socket.socket fd=380, family=2, type=1, proto=0, laddr=('192.168.8.100', 48885)>
+2024-09-23 11:32:30,726 [DEBUG] New: <socket.socket fd=376, family=2, type=2, proto=0, laddr=('192.168.8.100', 48885)>
+2024-09-23 11:59:37,878 [INFO ] TCP/UDP server is running
+2024-09-23 11:59:37,879 [DEBUG] New: <socket.socket fd=416, family=2, type=1, proto=0, laddr=('192.168.8.100', 48885)>
+2024-09-23 11:59:37,879 [DEBUG] New: <socket.socket fd=428, family=2, type=2, proto=0, laddr=('192.168.8.100', 48885)>
+2024-09-23 12:02:25,651 [INFO ] TCP/UDP server is running
+2024-09-23 12:02:25,651 [DEBUG] New: <socket.socket fd=376, family=2, type=1, proto=0, laddr=('192.168.8.100', 48885)>
+2024-09-23 12:02:25,651 [DEBUG] New: <socket.socket fd=408, family=2, type=2, proto=0, laddr=('192.168.8.100', 48885)>

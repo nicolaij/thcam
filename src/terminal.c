@@ -15,6 +15,10 @@ static const char *TAG = "terminal";
 
 nvs_handle_t my_handle;
 
+int NB_terminal_mode = 0;
+
+extern TaskHandle_t xHandleNB;
+
 menu_t menu[] = {
     {.id = "id", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
     {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 10, .max = 100000},
@@ -161,7 +165,25 @@ void console_task(void *arg)
 
     while (1)
     {
-        const int rxBytes = uart_read_bytes(UART_NUM_0, data, 128, 200 / portTICK_PERIOD_MS);
+        const int rxBytes = uart_read_bytes(UART_NUM_0, data, 1, 50 / portTICK_PERIOD_MS);
+
+        if (NB_terminal_mode)
+        {
+            if (rxBytes > 0)
+            {
+                int wr = uart_write_bytes(UART_NUM_1, data, rxBytes);
+                // ESP_LOGE(TAG, "%c(%02x)", *data, *data);
+                // print_atcmd("ATI", (char*)data);
+                xEventGroupSetBits(ready_event_group, NBTERMINAL_ACTIVE);
+            }
+
+            while (uart_read_bytes(UART_NUM_1, data, 1, 50 / portTICK_PERIOD_MS) > 0)
+            {
+                putchar(*data);
+            }
+            continue;
+        }
+
         if (rxBytes > 0)
         {
             if (data[rxBytes - 1] == '\n')
@@ -244,6 +266,13 @@ void console_task(void *arg)
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = 0;
                     }
+                    else if (n == sizeof(menu) / sizeof(menu_t) + 2) // AT терминал NBIoT
+                    {
+                        NB_terminal_mode = 1;
+                        xEventGroupSetBits(ready_event_group, NB_STOP);
+                        // vTaskSuspend(xHandleNB); // Suspend NBIot task
+                        enter_value = 0;
+                    }
                     else
                     {
                         char datetime[24];
@@ -261,6 +290,7 @@ void console_task(void *arg)
                             ESP_LOGI("menu", "%2i. %s: %li %s", i + 1, menu[i].name, menu[i].val, menu[i].izm);
                         }
                         ESP_LOGI("menu", "%2i. История: %i", i + 1, bootCount);
+                        ESP_LOGI("menu", "%2i. AT терминал NBIoT", i + 2);
 
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = 0;

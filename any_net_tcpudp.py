@@ -6,7 +6,7 @@ import os
 import logging
 import sys
 
-HOST = '10.179.40.20'
+HOST = '192.168.8.100'
 PORT = 48885
 # FASTLOADDIR = 'c:\\InSQL\\Data\\DataImport\\'
 DATASIZE = 1024
