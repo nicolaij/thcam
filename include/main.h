@@ -93,6 +93,7 @@ typedef struct
             bool d_reserved1 : 1;
             bool d_nbiot_send_succes : 1;
             bool d_nbiot_sim_error : 1;
+            bool d_thsensor_error : 1;
         };
     };
     float internal_temp;
@@ -116,10 +117,10 @@ typedef struct
 
 extern result_data_t result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%3.0f,\"NBbatt\":%1.3f,\"adclight\":%4.0f,\"adcwater\":%4.0f,\"adcwater2\":%4.0f,\"cputemp\":%2.1f,\"temp\":%2.1f,\"humidity\":%3.1f,\"pressure\":%4.3f,\"flags\":\"0x%02X\"}"
-#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water2, prefix.internal_temp, prefix.temp, prefix.humidity, prefix.pressure, prefix.discrete
-#define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, Water2, CPUTemp, Temp, Humidity, Pressure, Flags"
-#define OUT_MEASURE_FORMATS "%3.0f, %1.3f, %4.0f, %4.0f, %4.0f, %2.1f, %2.1f, %3.1f, %4.3f, 0x%02X"
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%3.0f,\"Battery\":%1.3f,\"Light\":%4.0f,\"Water\":%4.0f,\"Water2\":%4.0f,\"Temp\":%2.1f,\"Humidity\":%3.1f,\"Pressure\":%4.3f,\"Flags\":\"0x%02X\"}"
+#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water2, prefix.temp, prefix.humidity, prefix.pressure, prefix.discrete
+#define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, Water2, Temp, Humidity, Pressure, Flags"
+#define OUT_MEASURE_FORMATS "%3.0f, %1.3f, %4.0f, %4.0f, %4.0f, %2.1f, %3.1f, %4.3f, 0x%02X"
 
 #define HISTORY_SIZE 150
 extern measure_data_t history[HISTORY_SIZE];

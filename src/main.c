@@ -144,6 +144,9 @@ void app_main(void)
 
     ESP_LOGI("temperature_sensor", "Internal temperature:  %.01f°C", result.measure.internal_temp);
 
+    result.measure.temp = result.measure.internal_temp;
+    result.measure.d_thsensor_error = true;
+
     // i2c
     i2c_master_bus_config_t i2c_mst_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
@@ -196,7 +199,6 @@ void app_main(void)
 
     if (err_rc == ESP_OK)
     {
-
         ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev_handle));
 
         if (dev_cfg.device_address == 0x40) // HTU21
@@ -224,6 +226,8 @@ void app_main(void)
             if (err_rc == ESP_OK && (buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)
             {
                 result.measure.humidity = -6.0 + 125.0 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
+
+                result.measure.d_thsensor_error = false;
             }
 
             ESP_LOGI(TAG, "Read from I2C: T=%.01f°C, H=%.01f%%", result.measure.temp, result.measure.humidity);
@@ -264,6 +268,8 @@ void app_main(void)
                              result.measure.temp,
                              result.measure.pressure,
                              result.measure.humidity);
+
+                    result.measure.d_thsensor_error = false;
                 }
                 else
                 {

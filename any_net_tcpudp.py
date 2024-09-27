@@ -6,9 +6,9 @@ import os
 import logging
 import sys
 
-HOST = '192.168.8.100'
+HOST = '192.168.8.2'
 PORT = 48885
-# FASTLOADDIR = 'c:\\InSQL\\Data\\DataImport\\'
+FASTLOADDIR = 'o:\\СОДК\\Сервер\\sodk\\'
 DATASIZE = 1024
 
 
@@ -44,16 +44,12 @@ def parse_msg(msg):
 # create csv data file
 # {"id":"12.1","num":1,"dt":"2000-12-12 00:00:58","U":542,"R":299999,"Ub1":9.764,"Ub0":12.035,"U0":0,"in":1,"T":28.7,"rssi":-63}
 
+inputstring = '{"id":"cam2","num":10,"dt":"2024-09-25 15:14:34","RSSI":-93,"NBbatt":3.316,"adclight": 620,"adcwater": 750,"adcwater2":   0,"cputemp":26.5,"temp":25.8,"humidity":36.5,"pressure":999.349,"flags":"0x00"}'
+# dataname = ['dt', 'num', 'RSSI', 'Battery', 'Light', 'Water','Water2', 'CPUTemp', 'Temp', 'Humidity', 'Pressure', 'Flags']
+# datanametag = ['RSSI', 'Battery', 'Light', 'Water', 'Water2','CPUTemp', 'Temp', 'Humidity', 'Pressure', 'Flags']
+
+
 def write_csv(js):
-    # "{\"id\"=\"cam1\",\"rssi\"=%d,\"NBbatt\"=%d,\"batt\"=%.2f,\"adclight\"=%.0f,\"adcwater\"=%.0f,\"adcwater2\"=%.0f,\"cputemp\"=%.1f,\"temp\"=%.1f,\"humidity\"=%.1f}"
-    dataname = ['dt', 'num', 'temp', 'humidity', 'adclight', 'adcwater', 'adcwater2', 'cputemp', 'batt', 'NBbatt', 'rssi']
-    for d in dataname:
-        try:
-            if js[d] == '':
-                js[d] = ''
-        except:
-            js[d] = ''
-            pass
 
     csvFilename = '{}_{:%Y-%m}.csv'.format(js["id"], datetime.datetime.now())
     try:
@@ -61,19 +57,80 @@ def write_csv(js):
             n = csvfile.read(1)
     except:
         with open(csvFilename, 'w', newline='') as csvfile:
-            for x in dataname:
-                csvfile.write(x + ";")
-
+            csvfile.write("dt;num;")
+            for key in js:
+                if (key != "id" and key != "num" and key != "dt"):
+                    csvfile.write(key + ";")
             csvfile.write("\n")
+
         pass
 
     try:
         with open(csvFilename, 'a', newline='') as csvfile:
-            for x in dataname:
-                csvfile.write(str(js[x]).replace('.', ',') + ";")
-
+            csvfile.write("{};{};".format(js["dt"], js["num"]))
+            for key in js:
+                if (key != "id" and key != "num" and key != "dt"):
+                    csvfile.write(str(js[key]).replace('.', ',') + ";")
             csvfile.write("\n")
+
     except Exception as e:
+        logging.error(e)
+        pass
+
+
+def get_name(id):
+    idn = 0
+    if (id.startswith("cam")):
+        idn = int(id[3:])
+    else:
+        return
+
+    # Получение полного пути к файлу скрипта
+    file_path = os.path.realpath(__file__)
+    # Получение директории, в которой находится файл скрипта
+    script_dir = os.path.dirname(file_path)
+    file = script_dir + "/" + "names.txt"
+
+    # open the file in read mode
+
+    with open(file, 'r') as file:
+        # read lines from the file
+        lines = file.readlines()
+
+    res = {}
+
+    for line in lines:
+        # read lines from the file
+        key, value = line.strip().split(':')
+        # print("{}: {}".format(key, value))
+        res[key.strip()] = value.strip()
+
+    return res[str(idn)]
+
+
+# create Wonderware Historian Fast load
+def write_historian(js):
+    id = js["id"]
+    name = get_name(id)
+
+    IntouchFilename = '{}{} {:%Y-%m-%d_%H.%M.%S.%f}.csv'.format(
+        FASTLOADDIR, id, datetime.datetime.now())
+    try:
+        with open(IntouchFilename, 'w', encoding="latin-1") as f:
+            f.write("ASCII\n,\n")
+            f.write("SODK,1,Server Local,1,1\n")
+            dt = datetime.datetime.strptime(js["dt"], "%Y-%m-%d %H:%M:%S")
+            time_and_date = '{:%Y/%m/%d,%H:%M:%S}.000'.format(dt)
+            # for d in datanametag:
+            #    print("compare {}".format(d))
+            # print("compare {}: {}, {}\n".format(d, d in js, js[d] != ''))
+            for key in js:
+                if (key != "id" and key != "num" and key != "dt"):
+                    f.write("TK{}_{},0,{},0,{},192\n".format(name.encode(
+                        encoding="latin-1", errors="ignore").decode(), key, time_and_date, js[key]))
+
+    except Exception as e:
+        # print('File error! {}'.format(e))
         logging.error(e)
         pass
 
@@ -88,6 +145,8 @@ if __name__ == '__main__':
             logging.StreamHandler(sys.stdout)
         ]
     )
+
+    write_historian(json.loads(inputstring))
 
     # Откуда и куда записывать информацию
     outputs = []
@@ -136,8 +195,10 @@ if __name__ == '__main__':
                     str(client_address), str(message)))
                 try:
                     for js in parse_msg(message.decode(encoding="latin-1", errors="ignore")):
-                        if js["id"]:
+                        if "id" in js:
                             write_csv(js)
+                            write_historian(js)
+
                 except Exception as e:
                     # print(e)
                     logging.error(e)

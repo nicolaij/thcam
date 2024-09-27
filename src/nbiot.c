@@ -613,7 +613,7 @@ void modem_task(void *arg)
                     {
                         // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
                         // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
-                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_id("id"), result.bootCount, datetime, result.measure.rssi, result.measure.nbbattery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure, result.measure.discrete);
+                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_id("id"), result.bootCount, datetime, OUT_MEASURE_VARS(result.measure));
 
                         ESP_LOGI(TAG, "Send...");
 
