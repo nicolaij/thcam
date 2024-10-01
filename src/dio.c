@@ -13,11 +13,9 @@
 
 #include "led_strip.h"
 
-#include "esp_adc/adc_oneshot.h"
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
+#include "esp_adc/adc_continuous.h"
 
-// static const char *TAG = "DIO";
+static const char *TAG = "DIO";
 
 #define QUEUE_LENGTH 1
 #define ITEM_SIZE sizeof(uint64_t)
@@ -26,6 +24,21 @@ QueueHandle_t xQueue = NULL;
 uint8_t ucQueueStorageArea[QUEUE_LENGTH * ITEM_SIZE];
 
 QueueHandle_t xQueueLed = NULL;
+
+adc_continuous_handle_t handle;
+
+// R - внешний 10к
+// r - внешний 10к + внутр. нижн. 45к.
+// P - питание через верхний ключ
+char water1_mode = 'R';
+
+// r - внутр. нижн. 45к.
+// 0 - свободный
+char water2_mode = '0';
+
+#define points 400
+
+uint8_t adcresult[points * 4 * 2] = {0};
 
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
@@ -52,6 +65,43 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
     }
 }
 
+static void continuous_adc_init()
+{
+    adc_continuous_handle_cfg_t adc_config = {
+        .max_store_buf_size = points * 2 * 4,
+        .conv_frame_size = points * 2 * 4,
+    };
+    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &handle));
+
+    adc_continuous_config_t dig_cfg = {
+        .sample_freq_hz = 50 * 2 * points / 2,
+        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
+    };
+
+    adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
+    int num = 0;
+
+    adc_pattern[num].atten = ADC_ATTEN_DB_12;
+    adc_pattern[num].channel = PIN_LIGHT;
+    adc_pattern[num].unit = ADC_UNIT_1;
+    adc_pattern[num].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
+    num++;
+    adc_pattern[num].atten = ADC_ATTEN_DB_12;
+    adc_pattern[num].channel = PIN_WATER2;
+    adc_pattern[num].unit = ADC_UNIT_1;
+    adc_pattern[num].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
+    num++;
+    dig_cfg.pattern_num = num;
+
+    // ESP_LOGI(TAG, "adc_pattern[%d].atten is :%" PRIx8, i, adc_pattern[i].atten);
+    // ESP_LOGI(TAG, "adc_pattern[%d].channel is :%" PRIx8, i, adc_pattern[i].channel);
+    // ESP_LOGI(TAG, "adc_pattern[%d].unit is :%" PRIx8, i, adc_pattern[i].unit);
+
+    dig_cfg.adc_pattern = adc_pattern;
+    ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
+}
+
 void dio_init()
 {
     static StaticQueue_t xStaticQueue;
@@ -60,10 +110,11 @@ void dio_init()
 
     xQueueLed = xQueueCreate(2, sizeof(led_task_data_t));
 
-    // install gpio isr service
-    gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1);
-
     ESP_ERROR_CHECK(gpio_hold_dis(PIN_WATER1));
+    ESP_ERROR_CHECK(gpio_hold_dis(PIN_WATER2));
+
+    // install gpio isr service
+    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1));
 
     // zero-initialize the config structure.
     gpio_config_t io_conf = {};
@@ -76,8 +127,9 @@ void dio_init()
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     // configure GPIO with the given settings
-    gpio_config(&io_conf);
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
 
+    water1_mode = 'P';
     gpio_set_level(PIN_WATER1, 1);
     gpio_set_level(PIN_CHARGE_CONTROL, 0);
 
@@ -87,192 +139,298 @@ void dio_init()
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    gpio_config(&io_conf);
-    gpio_isr_handler_add(PIN_BATT, gpio_isr_handler, (void *)PIN_BATT);
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(PIN_BATT, gpio_isr_handler, (void *)PIN_BATT));
 
+    continuous_adc_init();
+
+    ESP_ERROR_CHECK(adc_continuous_start(handle));
+
+    uint32_t ret_num = 0;
+    uint32_t light = 0;
+    uint32_t light_cnt = 0;
+    uint32_t water = 0;
+    uint32_t water_cnt = 0;
+    esp_err_t ret = adc_continuous_read(handle, adcresult, sizeof(adcresult), &ret_num, ADC_MAX_DELAY);
+    if (ret == ESP_OK)
+    {
+        ESP_ERROR_CHECK(adc_continuous_stop(handle));
+
+        ESP_LOGI(TAG, "ret is %x, ret_num is %" PRIu32 " bytes", ret, ret_num);
+        for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES)
+        {
+            adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
+            uint32_t chan_num = p->type2.channel;
+            uint32_t data = p->type2.data;
+            if (chan_num == PIN_LIGHT)
+            {
+                light += data;
+                light_cnt++;
+            }
+            if (chan_num == PIN_WATER2)
+            {
+                water += data;
+                water_cnt++;
+            }
+        }
+
+        result.measure.light = light / light_cnt;
+        result.measure.water = water / water_cnt;
+
+        ESP_LOGI("Light", "ADC chan %d: %4.0f", PIN_LIGHT, result.measure.light);
+        ESP_LOGI("Water", "ADC chan %d: %4.0f", PIN_WATER2, result.measure.water);
+
+#if LOG_LOCAL_LEVEL == ESP_LOG_DEBUG
+        for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES)
+        {
+            adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
+            uint32_t chan_num = p->type2.channel;
+            uint32_t data = p->type2.data;
+            if (chan_num == 3)
+                printf("%3lu ", data);
+        }
+        printf("\n\n");
+        for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES)
+        {
+            adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
+            uint32_t chan_num = p->type2.channel;
+            uint32_t data = p->type2.data;
+
+            if (chan_num == 4)
+                printf("%3lu ", data);
+        }
+        printf("\n\n");
+#endif
+    }
+    else if (ret == ESP_ERR_TIMEOUT)
+    {
+        ESP_ERROR_CHECK(adc_continuous_stop(handle));
+    }
+
+    // PIN_WATER1 подтянут 10кОм, с pulldown будет около 2,5В
     io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pin_bit_mask = BIT64(PIN_WATER1);
+    io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    gpio_config(&io_conf);
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    water1_mode = 'r';
 
-    // gpio_set_level(PIN_CHARGE_CONTROL, 1);
-    // vTaskDelay(1);
-    // ESP_LOGI("Battery", "Charge 1 Pin[%d] Input: %d", PIN_BATT, gpio_get_level(PIN_BATT));
-    // gpio_set_level(PIN_CHARGE_CONTROL, 0);
-    // vTaskDelay(1);
+    // включам подтяжку входа ADC, при кз будет около 1,8 в
+    ESP_ERROR_CHECK(gpio_pulldown_en(PIN_WATER2));
+    water2_mode = 'r';
 
-    led_task_data_t led = {.set = 0, .xTicksToDelay = pdMS_TO_TICKS(2000)};
-    led.red = 40 * gpio_get_level(PIN_LIGHT);
-    led.blue = 40 * gpio_get_level(PIN_WATER2);
-    xQueueSend(xQueueLed, &led, 0);
+    // ESP_ERROR_CHECK(gpio_pulldown_en(PIN_LIGHT));
+
+    ESP_ERROR_CHECK(adc_continuous_start(handle));
+
+    ret_num = 0;
+    light = 0;
+    light_cnt = 0;
+    water = 0;
+    water_cnt = 0;
+    ret = adc_continuous_read(handle, adcresult, sizeof(adcresult), &ret_num, ADC_MAX_DELAY);
+    if (ret == ESP_OK)
+    {
+        ESP_ERROR_CHECK(adc_continuous_stop(handle));
+
+        ESP_LOGI(TAG, "ret is %x, ret_num is %" PRIu32 " bytes", ret, ret_num);
+        for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES)
+        {
+            adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
+            uint32_t chan_num = p->type2.channel;
+            uint32_t data = p->type2.data;
+            if (chan_num == PIN_LIGHT)
+            {
+                light += data;
+                light_cnt++;
+            }
+            if (chan_num == PIN_WATER2)
+            {
+                water += data;
+                water_cnt++;
+            }
+        }
+
+        // result.measure.light = light / light_cnt;
+        result.measure.water2 = water / water_cnt;
+        ESP_LOGI("Water", "ADC chan %d: %4.0f (pulldown)", PIN_WATER2, result.measure.water2);
+
+#if LOG_LOCAL_LEVEL == ESP_LOG_DEBUG
+        for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES)
+        {
+            adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
+            uint32_t chan_num = p->type2.channel;
+            uint32_t data = p->type2.data;
+            if (chan_num == 3)
+                printf("%3lu ", data);
+        }
+        printf("\n\n");
+        for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES)
+        {
+            adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
+            uint32_t chan_num = p->type2.channel;
+            uint32_t data = p->type2.data;
+
+            if (chan_num == 4)
+                printf("%3lu ", data);
+        }
+        printf("\n\n");
+#endif
+    }
+    else if (ret == ESP_ERR_TIMEOUT)
+    {
+        ESP_ERROR_CHECK(adc_continuous_stop(handle));
+    }
+
+    ESP_ERROR_CHECK(adc_continuous_deinit(handle));
+
+    /*
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        gpio_config(&io_conf);
+
+        // gpio_set_level(PIN_CHARGE_CONTROL, 1);
+        // vTaskDelay(1);
+        // ESP_LOGI("Battery", "Charge 1 Pin[%d] Input: %d", PIN_BATT, gpio_get_level(PIN_BATT));
+        // gpio_set_level(PIN_CHARGE_CONTROL, 0);
+
+        led_task_data_t led = {.set = 0, .xTicksToDelay = pdMS_TO_TICKS(2000)};
+        led.red = 40 * gpio_get_level(PIN_LIGHT);
+        led.blue = 40 * gpio_get_level(PIN_WATER2);
+        xQueueSend(xQueueLed, &led, 0);
+    */
 
     // ADC
-    static int adc_raw;
-    // const float kV = get_menu_id("kbatt");
-
-    adc_oneshot_unit_handle_t adc1_handle;
-    adc_oneshot_unit_init_cfg_t init_config1 = {
-        .unit_id = ADC_UNIT_1,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
-
-    //-------------ADC1 Config---------------//
-    adc_oneshot_chan_cfg_t config = {
-        .bitwidth = ADC_BITWIDTH_DEFAULT,
-        .atten = ADC_ATTEN_DB_12,
-    };
-
-    const int count = 5;
-    unsigned int sum = 0;
     /*
-        ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_BATT, &config));
+        static int adc_raw;
+        // const float kV = get_menu_id("kbatt");
 
-        gpio_pulldown_en(PIN_BATT);
-        vTaskDelay(1);
+        adc_oneshot_unit_handle_t adc1_handle;
+        adc_oneshot_unit_init_cfg_t init_config1 = {
+            .unit_id = ADC_UNIT_1,
+        };
+        ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
+
+        //-------------ADC1 Config---------------//
+        adc_oneshot_chan_cfg_t config = {
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+            .atten = ADC_ATTEN_DB_12,
+        };
+
+        const int count = 10;
+        const int delay = 2;
+        unsigned int sum = 0;
+
+        ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_LIGHT, &config));
 
         sum = 0;
         for (int i = 0; i < count; i++)
         {
-            ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_BATT, &adc_raw));
+            vTaskDelay(delay);
+            ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_LIGHT, &adc_raw));
             sum = sum + adc_raw;
-            ESP_LOGD("Battery", "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, PIN_BATT, adc_raw);
-            vTaskDelay(1);
+            ESP_LOGD("Light", "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, PIN_LIGHT, adc_raw);
         }
-        result.measure.battery = sum / count / kV;
-        ESP_LOGI("Battery", "ADC%d Channel[%d] AVG: %d, %.2f V", ADC_UNIT_1 + 1, PIN_BATT, sum / count, result.measure.battery);
-    */
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_LIGHT, &config));
-
-    sum = 0;
-    for (int i = 0; i < count; i++)
-    {
-        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_LIGHT, &adc_raw));
-        sum = sum + adc_raw;
-        ESP_LOGD("Light", "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, PIN_LIGHT, adc_raw);
-        vTaskDelay(1);
-    }
-    result.measure.light = sum / count;
-    ESP_LOGI("Light", "ADC%d Channel[%d] AVG: %d", ADC_UNIT_1 + 1, PIN_LIGHT, sum / count);
-
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_WATER2, &config));
-    sum = 0;
-    for (int i = 0; i < count; i++)
-    {
-        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_WATER2, &adc_raw));
-        sum = sum + adc_raw;
-        ESP_LOGD("Water", "ADC%d Channel[%d] Raw Data: %d, mode1 +3.3", ADC_UNIT_1 + 1, PIN_WATER2, adc_raw);
-        vTaskDelay(1);
-    }
-    result.measure.water = sum / count;
-    ESP_LOGI("Water", "ADC%d Channel[%d] AVG: %d, mode1 +3.3", ADC_UNIT_1 + 1, PIN_WATER2, sum / count);
-
-    // измерение dt0, dt1 воды
-    /*
-        uint64_t t;
-        io_conf.intr_type = GPIO_INTR_NEGEDGE;
-        io_conf.pin_bit_mask = BIT64(PIN_WATER2);
-        // set as input mode
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        gpio_config(&io_conf);
-
-        xQueueReset(xQueue);
-        vTaskDelay(pdMS_TO_TICKS(500));
-
-        ESP_ERROR_CHECK(gptimer_set_raw_count(gptimer, 0));
-        ESP_ERROR_CHECK(gptimer_start(gptimer));
-        gpio_set_level(PIN_WATER1, 0);
-        if (xQueueReceive(xQueue, &t, pdMS_TO_TICKS(500)))
-        {
-            ESP_LOGW(TAG, "Down. Timer stopped, count=%llu", t);
-
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
-        else
-        {
-            gptimer_get_raw_count(gptimer, &t);
-            ESP_LOGW(TAG, "Down. Missed one count event, count=%llu", t);
-        }
-
-        ESP_ERROR_CHECK(gptimer_stop(gptimer));
-
-        io_conf.intr_type = GPIO_INTR_POSEDGE;
-        io_conf.pin_bit_mask = BIT64(PIN_WATER2);
-        // set as input mode
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        gpio_config(&io_conf);
-
-        xQueueReset(xQueue);
-        ESP_ERROR_CHECK(gptimer_set_raw_count(gptimer, 0));
-        ESP_ERROR_CHECK(gptimer_start(gptimer));
-        gpio_set_level(PIN_WATER1, 1);
-        if (xQueueReceive(xQueue, &t, pdMS_TO_TICKS(500)))
-        {
-            ESP_LOGW(TAG, "Up. Timer stopped, count=%llu", t);
-        }
-        else
-        {
-            gptimer_get_raw_count(gptimer, &t);
-            ESP_LOGW(TAG, "Down. Missed one count event, count=%llu", t);
-        }
-        ESP_ERROR_CHECK(gptimer_stop(gptimer));
-        ESP_ERROR_CHECK(gptimer_disable(gptimer));
-    */
-
-    // если кз по датчику воды - переключаем вход на поддяжку и измеряем заново
-    if (adc_raw >= 000) // !!!  ВСЕГДА
-    {
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pin_bit_mask = BIT64(PIN_WATER1);
-        io_conf.pull_down_en = 1;
-        io_conf.pull_up_en = 1;
-        gpio_config(&io_conf);
+        result.measure.light = sum / count;
+        ESP_LOGI("Light", "ADC%d Channel[%d] AVG: %d", ADC_UNIT_1 + 1, PIN_LIGHT, sum / count);
 
         ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_WATER2, &config));
 
-        gpio_pulldown_en(PIN_WATER2);
-
-        vTaskDelay(pdMS_TO_TICKS(50));
-
         sum = 0;
         for (int i = 0; i < count; i++)
         {
+            vTaskDelay(delay);
             ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_WATER2, &adc_raw));
             sum = sum + adc_raw;
-            ESP_LOGD("Water", "ADC%d Channel[%d] Raw Data: %d, mode2 Pullup/Pulldown", ADC_UNIT_1 + 1, PIN_WATER2, adc_raw);
-            vTaskDelay(1);
+            ESP_LOGD("Water", "ADC%d Channel[%d] Raw Data: %d, mode1 +3.3", ADC_UNIT_1 + 1, PIN_WATER2, adc_raw);
         }
-        result.measure.water2 = sum / count;
-        ESP_LOGI("Water", "ADC%d Channel[%d] AVG: %d, mode2 Pullup/Pulldown", ADC_UNIT_1 + 1, PIN_WATER2, sum / count);
+        result.measure.water = sum / count;
+        ESP_LOGI("Water", "ADC%d Channel[%d] AVG: %d, mode1 +3.3", ADC_UNIT_1 + 1, PIN_WATER2, sum / count);
 
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_OUTPUT;
-        io_conf.pin_bit_mask = BIT64(PIN_WATER1);
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        gpio_config(&io_conf);
-        gpio_set_level(PIN_WATER1, 1);
-    }
+        // если кз по датчику воды - переключаем вход на поддяжку и измеряем заново
+        // PIN_WATER1 подтянут 10кОм, с pulldown будет около 2,5В
+        if (adc_raw >= 000) // !!!  ВСЕГДА
+        {
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            io_conf.mode = GPIO_MODE_INPUT;
+            io_conf.pin_bit_mask = BIT64(PIN_WATER1);
+            io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+            io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+            gpio_config(&io_conf);
 
+            // ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PIN_WATER2, &config));
+
+            // включам подтяжку входа ADC, при кз будет около 1,8 в
+            gpio_pulldown_en(PIN_WATER2);
+
+            sum = 0;
+            for (int i = 0; i < count; i++)
+            {
+                vTaskDelay(delay);
+                ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_WATER2, &adc_raw));
+                sum = sum + adc_raw;
+                ESP_LOGD("Water", "ADC%d Channel[%d] Raw Data: %d, mode2 Pullup/Pulldown", ADC_UNIT_1 + 1, PIN_WATER2, adc_raw);
+            }
+            result.measure.water2 = sum / count;
+            ESP_LOGI("Water", "ADC%d Channel[%d] AVG: %d, mode2 Pulldown", ADC_UNIT_1 + 1, PIN_WATER2, sum / count);
+
+        }
+    */
+
+    // Water1 - питание
     io_conf.intr_type = GPIO_INTR_DISABLE;
-    // io_conf.intr_type = GPIO_INTR_ANYEDGE;
-    io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
-    // set as input mode
-    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = BIT64(PIN_WATER1);
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    gpio_config(&io_conf);
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    water1_mode = 'P';
 
-    // gpio_isr_handler_add(PIN_LIGHT, gpio_isr_handler, (void *)PIN_LIGHT);
-    // gpio_isr_handler_add(PIN_WATER2, gpio_isr_handler, (void *)PIN_WATER2);
+    // Water2 - без подтяжек
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER2);
+    io_conf.mode = GPIO_MODE_INPUT;
+    // io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    water2_mode = '0';
 
-    ESP_LOGI("Battery", "Charge = %d", get_charge());
+    result.measure.d_wet_mode = 0;
+
+    vTaskDelay(1);
+
+    // Water2 - с подтяжкой
+    if (gpio_get_level(PIN_WATER2) == 1)
+    {
+        ESP_LOGI(TAG, "Water: %d (%c%c)", gpio_get_level(PIN_WATER2), water1_mode, water2_mode);
+        io_conf.pin_bit_mask = BIT64(PIN_WATER2);
+        io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+        water2_mode = 'r';
+        result.measure.d_wet_mode = 1;
+    }
+
+    if (gpio_get_level(PIN_LIGHT) == 1)
+    {
+        ESP_LOGI(TAG, "Light: %d", gpio_get_level(PIN_LIGHT));
+        io_conf.pin_bit_mask = BIT64(PIN_LIGHT);
+        io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+    }
+
+    vTaskDelay(1);
+
+    ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER1));
+    ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER2));
+
+    ESP_LOGI(TAG, "Light: %d; Water: %d (%c%c); Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER2), water1_mode, water2_mode, gpio_get_level(PIN_BATT));
 }
 
 void stop_charge()
@@ -286,12 +444,12 @@ int get_charge()
     return gpio_get_level(PIN_BATT);
 };
 
-void dio_sleep()
+uint64_t dio_sleep()
 {
 
-    // ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER1));
+    // ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER2));
 
-    ESP_LOGI("main", "Light: %d; Water: %d; Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER2), gpio_get_level(PIN_BATT));
+    ESP_LOGI(TAG, "Light: %d; Water: %d (%c%c); Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER2), water1_mode, water2_mode, gpio_get_level(PIN_BATT));
 
     uint64_t wake_mask = 0;
     if (gpio_get_level(PIN_LIGHT) == 0)
@@ -304,6 +462,8 @@ void dio_sleep()
         wake_mask |= BIT64(PIN_BATT);
 
     ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_HIGH));
+
+    return wake_mask;
 }
 
 void led_task(void *arg)
@@ -372,6 +532,7 @@ void btn_task(void *arg)
     int debounce = 0;
 
     int output = 0;
+    const int output_count = 3;
 
     const int short_count = 4;
     const int long_count = 50;
@@ -403,17 +564,44 @@ void btn_task(void *arg)
                 ESP_LOGI("IO", "Button short press!");
                 debounce = 0;
 
-                xEventGroupSetBits(ready_event_group, NEED_WIFI);
+                // xEventGroupSetBits(ready_event_group, NEED_WIFI);
 
-                if (output == 0)
+                if (++output > output_count)
                 {
-                    // gpio_set_level(PIN_CHARGE_CONTROL, 1);
-                    output++;
+                    output = 1;
                 }
-                else
+
+                gpio_config_t io_conf = {};
+
+                switch (output)
                 {
-                    // gpio_set_level(PIN_CHARGE_CONTROL, 0);
-                    output = 0;
+                case 1:
+                    io_conf.intr_type = GPIO_INTR_DISABLE;
+                    io_conf.mode = GPIO_MODE_INPUT;
+                    io_conf.pin_bit_mask = BIT64(PIN_WATER2);
+                    io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+                    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+                    gpio_config(&io_conf);
+                    break;
+                case 2:
+                    io_conf.intr_type = GPIO_INTR_DISABLE;
+                    io_conf.mode = GPIO_MODE_INPUT;
+                    io_conf.pin_bit_mask = BIT64(PIN_WATER1);
+                    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+                    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+                    gpio_config(&io_conf);
+                    break;
+                case 3:
+                    io_conf.intr_type = GPIO_INTR_DISABLE;
+                    io_conf.mode = GPIO_MODE_INPUT;
+                    io_conf.pin_bit_mask = BIT64(PIN_WATER1);
+                    io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+                    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+                    gpio_config(&io_conf);
+                    break;
+
+                default:
+                    break;
                 }
             };
         }

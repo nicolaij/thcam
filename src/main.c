@@ -434,8 +434,16 @@ void app_main(void)
     }
 
     // Light, Water
-    dio_sleep();
+    uint64_t wake_mask = dio_sleep();
 
+    //если затопление или засвет - сон 15 мин.
+    if ((wake_mask & BIT64(PIN_WATER2)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
+    {
+        if (sleeptime > 15)
+            sleeptime = 15;
+    }
+
+    //если зарядка - сон 1 мин.
     if (xEventGroupGetBits(ready_event_group) & NOW_CHARGE || get_charge() == 1)
         sleeptime = 1;
 

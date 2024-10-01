@@ -9,9 +9,9 @@
 #define MODEM_POWER GPIO_NUM_10
 #define PIN_BATT GPIO_NUM_0
 #define PIN_CHARGE_CONTROL GPIO_NUM_5
-#define PIN_LIGHT GPIO_NUM_3
+#define PIN_LIGHT GPIO_NUM_4
 #define PIN_WATER1 GPIO_NUM_2
-#define PIN_WATER2 GPIO_NUM_4
+#define PIN_WATER2 GPIO_NUM_3
 #define PIN_BUTTON_BOOT GPIO_NUM_9
 
 #define TXD_PIN (GPIO_NUM_19)
@@ -43,7 +43,7 @@ int get_menu_json(char *buf);
 int get_menu_html(char *buf);
 
 void dio_init();
-void dio_sleep();
+uint64_t dio_sleep();
 void stop_charge();
 int get_charge();
 
@@ -90,7 +90,7 @@ typedef struct
             bool d_light : 1;
             bool d_water : 1;
             bool d_charge : 1;
-            bool d_reserved1 : 1;
+            bool d_wet_mode : 1;
             bool d_nbiot_send_succes : 1;
             bool d_nbiot_sim_error : 1;
             bool d_thsensor_error : 1;
