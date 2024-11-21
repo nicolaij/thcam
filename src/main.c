@@ -370,8 +370,7 @@ void app_main(void)
                    NBTERMINAL_ACTIVE, /* The bits within the event group to wait for. */
                    pdTRUE,            /* BIT_0 & BIT_1 should be cleared before returning. */
                    pdFALSE,           /* ОБА */
-                   1 * 60000 / portTICK_PERIOD_MS) &
-               NBTERMINAL_ACTIVE)
+                   1 * 60000 / portTICK_PERIOD_MS) & NBTERMINAL_ACTIVE)
         {
             // NBTERMINAL_ACTIVE = 1, ждем 1 мин
             vTaskDelay(60000 / portTICK_PERIOD_MS);
@@ -414,8 +413,8 @@ void app_main(void)
             ready_event_group, /* The event group being tested. */
             WIFI_STOP,         /* The bits within the event group to wait for. */
             pdFALSE,           /* BIT_0 & BIT_1 should be cleared before returning. */
-            pdFALSE,           /* ОБА */
-            wait * 60000 / portTICK_PERIOD_MS);
+            pdFALSE,           /* ОБА ? */
+            portMAX_DELAY);
     }
 
     xEventGroupSetBits(ready_event_group, END_WORK);
@@ -436,14 +435,14 @@ void app_main(void)
     // Light, Water
     uint64_t wake_mask = dio_sleep();
 
-    //если затопление или засвет - сон 15 мин.
+    // если затопление или засвет - сон 15 мин.
     if ((wake_mask & BIT64(PIN_WATER2)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
     {
         if (sleeptime > 15)
             sleeptime = 15;
     }
 
-    //если зарядка - сон 1 мин.
+    // если зарядка - сон 1 мин.
     if (xEventGroupGetBits(ready_event_group) & NOW_CHARGE || get_charge() == 1)
         sleeptime = 1;
 

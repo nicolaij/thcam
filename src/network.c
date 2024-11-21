@@ -78,7 +78,7 @@ typedef struct
 void reset_sleep_timeout()
 {
     timeout_begin = esp_timer_get_time();
-    ESP_LOGV(TAGW, "Timeout reset");
+    // ESP_LOGV(TAGW, "Timeout reset");
 }
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -305,6 +305,8 @@ static esp_err_t download_get_handler(httpd_req_t *req)
 
 static esp_err_t menu_get_handler(httpd_req_t *req)
 {
+    reset_sleep_timeout();
+
     int l = 0;
     char datetime[24];
     struct tm *localtm = localtime(&result.ttime);
@@ -390,6 +392,65 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
     // End response
     return download_get_handler(req);
 }
+
+// Get measure data
+esp_err_t d_get(httpd_req_t *req)
+{
+    reset_sleep_timeout();
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"data.txt\"");
+    httpd_resp_set_hdr(req, "Connection", "close");
+
+    int l = 0;
+    int ll = 0;
+    int n = 0;
+    buf[0] = '\0';
+
+    do
+    {
+
+        ll = getResult_Data(&buf[l], n);
+
+        if (ll == 0) // data end
+            break;
+
+        l = l + ll;
+        if (l > (sizeof(buf) - 128))
+        {
+            /* Send the buffer contents as HTTP response chunk */
+            if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+            {
+                ESP_LOGE("WWW", "File sending failed!");
+                /* Abort sending file */
+                ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_sendstr_chunk(req, NULL));
+                /* Respond with 500 Internal Server Error */
+                ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file"));
+                return ESP_FAIL;
+            }
+
+            l = 0;
+        }
+        n++;
+    } while (ll > 0);
+
+    if (l > 0)
+    {
+        if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+        {
+            ESP_LOGE("WWW", "File sending failed!");
+            /* Abort sending file */
+            ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_sendstr_chunk(req, NULL));
+            /* Respond with 500 Internal Server Error */
+            ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file"));
+            return ESP_FAIL;
+        }
+    }
+
+    /* Respond with an empty chunk to signal HTTP response completion */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_send_chunk(req, NULL, 0));
+    return ESP_OK;
+};
 
 #define ESP_IMAGE_HEADER_MAGIC 0xE9 /*!< The magic word for the esp_image_header_t structure. */
 
@@ -555,6 +616,26 @@ httpd_uri_t update_post = {
     .handler = update_post_handler,
     .user_ctx = NULL};
 
+httpd_uri_t data_csv = {
+    .uri = "/d.csv",
+    .method = HTTP_GET,
+    .handler = d_get,
+    .user_ctx = NULL};
+
+httpd_uri_t d3 = {
+    .uri = "/d3",
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/D3.html", .content = "text/html"}),
+};
+
+static const httpd_uri_t d3_get_gz = {
+    .uri = "/d3.min.js",
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/d3.min.js.gz", .content = "application/javascript"}),
+};
+
 static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -566,6 +647,7 @@ static httpd_handle_t start_webserver(void)
     // config.recv_wait_timeout = 30;
     // config.task_priority = 6;
     // config.close_fn = ws_close_fn;
+    config.max_uri_handlers = 10;
 
     // Start the httpd server
     ESP_LOGI(TAGH, "Starting server on port: '%d'", config.server_port);
@@ -582,6 +664,11 @@ static httpd_handle_t start_webserver(void)
 
         httpd_register_uri_handler(server, &data_page);
         httpd_register_uri_handler(server, &olddata_page);
+
+        httpd_register_uri_handler(server, &data_csv);
+        httpd_register_uri_handler(server, &d3);
+        httpd_register_uri_handler(server, &d3_get_gz);
+
         return server;
     }
 
@@ -630,6 +717,11 @@ void wifi_task(void *arg)
     while (1)
     {
         // WiFi timeout
+        if (esp_timer_get_time() - timeout_begin > 6 * 60 * 1000000)
+        {
+            xEventGroupSetBits(ready_event_group, WIFI_STOP);
+        }
+
         EventBits_t uxBits = xEventGroupGetBits(ready_event_group);
         if (uxBits & END_WORK)
         {

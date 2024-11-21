@@ -9,9 +9,11 @@
 #define MODEM_POWER GPIO_NUM_10
 #define PIN_BATT GPIO_NUM_0
 #define PIN_CHARGE_CONTROL GPIO_NUM_5
+#define PIN_WATER3 GPIO_NUM_1
 #define PIN_LIGHT GPIO_NUM_4
 #define PIN_WATER1 GPIO_NUM_2
 #define PIN_WATER2 GPIO_NUM_3
+#define PIN_ONEWARE GPIO_NUM_8
 #define PIN_BUTTON_BOOT GPIO_NUM_9
 
 #define TXD_PIN (GPIO_NUM_19)
@@ -27,6 +29,8 @@
 #define NBTERMINAL_ACTIVE BIT8
 #define NB_STOP BIT9
 
+#define ONEWIRE_MAX_DS18B20 1
+
 extern EventGroupHandle_t ready_event_group;
 
 void modem_task(void *arg);
@@ -34,6 +38,7 @@ void led_task(void *arg);
 void console_task(void *arg);
 void btn_task(void *arg);
 void wifi_task(void *arg);
+void dallas_task(void *arg);
 
 esp_err_t read_nvs_menu();
 esp_err_t init_nvs();
@@ -51,6 +56,9 @@ void nbiot_power_pin(const TickType_t xTicksToDelay);
 
 esp_err_t print_atcmd(const char *cmd, char *buffer);
 
+int getResult_Data(char *line, int data_pos);
+
+esp_err_t read_nvs_id(const char *key, uint64_t *out_value);
 
 typedef struct
 {
@@ -101,8 +109,8 @@ typedef struct
     float humidity;
     float pressure;
     float light;
+    float water_temp;
     float water;
-    float water2;
     float battery;
     float nbbattery;
     float rssi;
@@ -116,13 +124,14 @@ typedef struct
 } result_data_t;
 
 extern result_data_t result;
+extern result_data_t old_result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%3.0f,\"Battery\":%1.3f,\"Light\":%4.0f,\"Water\":%4.0f,\"Water2\":%4.0f,\"Temp\":%2.1f,\"Humidity\":%3.1f,\"Pressure\":%4.3f,\"Flags\":\"0x%02X\"}"
-#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water2, prefix.temp, prefix.humidity, prefix.pressure, prefix.discrete
-#define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, Water2, Temp, Humidity, Pressure, Flags"
-#define OUT_MEASURE_FORMATS "%3.0f, %1.3f, %4.0f, %4.0f, %4.0f, %2.1f, %3.1f, %4.3f, 0x%02X"
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%3.0f,\"Battery\":%1.3f,\"Light\":%4.0f,\"Water\":%4.0f,\"WaterTemp\":%2.1f,\"Temp\":%2.1f,\"Humidity\":%3.1f,\"Pressure\":%4.3f,\"Flags\":\"0x%02X\"}"
+#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.pressure, prefix.discrete
+#define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, WaterTemp, Temp, Humidity, Pressure, Flags"
+#define OUT_MEASURE_FORMATS "%3.0f, %1.3f, %4.0f, %4.0f, %2.1f, %2.1f, %3.1f, %4.3f, 0x%02X"
 
-#define HISTORY_SIZE 150
+#define HISTORY_SIZE 100
 extern measure_data_t history[HISTORY_SIZE];
 
 extern int bootCount;

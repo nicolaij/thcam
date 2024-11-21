@@ -6,7 +6,7 @@ import os
 import logging
 import sys
 
-HOST = '192.168.8.2'
+HOST = '10.179.40.11'
 PORT = 48885
 FASTLOADDIR = 'o:\\СОДК\\Сервер\\sodk\\'
 DATASIZE = 1024

@@ -25,8 +25,12 @@ menu_t menu[] = {
     {.id = "waitnb", .name = "Ожидание NB-IoT, WiFi", .izm = "мин", .val = 3, .min = 1, .max = 60},
     {.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
     {.id = "ip", .name = "IP сервера", .izm = "", .val = ((10 << 24) | (179 << 16) | (40 << 8) | (20)), .min = INT32_MIN, .max = INT32_MAX},
-    {.id = "tcpport", .name = "TCP порт сервера", .izm = "", .val = 48885, .min = 0, .max = 65535},
+    {.id = "tcpport", .name = "TCP порт сервера (0: не исп.)", .izm = "", .val = 48885, .min = 0, .max = 65535},
+    {.id = "udpport", .name = "UDP порт сервера (0: не исп.)", .izm = "", .val = 0, .min = 0, .max = 65535},
     {.id = "filesize", .name = "Макс. размер файла /data.csv", .izm = "кБ", .val = 192, .min = 0, .max = 200},
+    {.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
+    {.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
+    {.id = "uadc", .name = "Опорное напряжение", .izm = "мВ", .val = 2851, .min = 1, .max = 4000},
     //{.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
 
@@ -73,6 +77,35 @@ esp_err_t read_nvs_menu()
             default:
                 ESP_LOGE("NVS", "Error (%s) reading!", esp_err_to_name(err));
             }
+        }
+
+        // Close
+        nvs_close(my_handle);
+    }
+    return err;
+}
+
+esp_err_t read_nvs_id(const char *key, uint64_t *out_value)
+{
+    // Open
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &my_handle);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE("storage", "Error (%s) opening NVS handle!", esp_err_to_name(err));
+    }
+    else
+    {
+        err = nvs_get_u64(my_handle, key, out_value);
+        switch (err)
+        {
+        case ESP_OK:
+            ESP_LOGD("NVS", "Read \"%s\" = %016llX", key, *out_value);
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            ESP_LOGD("NVS", "The value  \"%s\" is not initialized yet!", key);
+            break;
+        default:
+            ESP_LOGE("NVS", "Error (%s) reading!", esp_err_to_name(err));
         }
 
         // Close
@@ -171,7 +204,7 @@ void console_task(void *arg)
         {
             if (rxBytes > 0)
             {
-                int wr = uart_write_bytes(UART_NUM_1, data, rxBytes);
+                uart_write_bytes(UART_NUM_1, data, rxBytes);
                 // ESP_LOGE(TAG, "%c(%02x)", *data, *data);
                 // print_atcmd("ATI", (char*)data);
                 xEventGroupSetBits(ready_event_group, NBTERMINAL_ACTIVE);

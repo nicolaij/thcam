@@ -64,26 +64,16 @@ esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickTyp
     return ESP_OK;
 }
 
-esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t timeout)
+esp_err_t wait_string(char *buffer, const char *wait, TickType_t ticks_to_wait)
 {
-    esp_err_t res = ESP_FAIL;
 
-    const char *wait = "OK\r\n";
     const char *err = "ERROR\r\n";
-
-    ESP_LOGV(TAG, "Send string:\"%s\"", (char *)cmd);
-
-    int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
-    if (txBytes < 4)
-    {
-        return ESP_ERR_INVALID_SIZE;
-    }
 
     int64_t start_time = esp_timer_get_time();
     char *pb = buffer;
     *pb = '\0';
-    res = ESP_ERR_TIMEOUT;
-    while ((esp_timer_get_time() - start_time) < timeout * portTICK_PERIOD_MS * 1000)
+    esp_err_t res = ESP_ERR_TIMEOUT;
+    do
     {
         int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), pdMS_TO_TICKS(500));
         // ESP_LOGV(TAG, "len: %d", len);
@@ -94,7 +84,45 @@ esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t timeout)
 
             if (strstr((const char *)buffer, wait) != NULL)
             {
-                // ESP_LOGV(TAG, "Compare OK");
+                res = ESP_OK;
+                break;
+            }
+            else if (strstr((const char *)buffer, err) != NULL)
+            {
+                res = ESP_ERR_INVALID_STATE;
+                break;
+            }
+        }
+        else if (len == -1)
+        {
+            return ESP_FAIL;
+        }
+    } while((esp_timer_get_time() - start_time) < ticks_to_wait * portTICK_PERIOD_MS * 1000);
+
+    return res;
+}
+
+esp_err_t wait_OK(char *buffer, TickType_t ticks_to_wait)
+{
+
+    const char *wait = "OK\r\n";
+    const char *err = "ERROR\r\n";
+
+    int64_t start_time = esp_timer_get_time();
+    char *pb = buffer;
+    *pb = '\0';
+    esp_err_t res = ESP_ERR_TIMEOUT;
+    while ((esp_timer_get_time() - start_time) < ticks_to_wait * portTICK_PERIOD_MS * 1000)
+    {
+        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), pdMS_TO_TICKS(500));
+        // ESP_LOGV(TAG, "len: %d", len);
+        if (len > 0)
+        {
+            pb += len;
+            *pb = '\0';
+
+            if (strstr((const char *)buffer, wait) != NULL)
+            {
                 res = ESP_OK;
                 break;
             }
@@ -109,6 +137,23 @@ esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t timeout)
             return ESP_FAIL;
         }
     }
+
+    return res;
+}
+
+esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t timeout)
+{
+    esp_err_t res = ESP_FAIL;
+
+    ESP_LOGV(TAG, "Send string:\"%s\"", (char *)cmd);
+
+    int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
+    if (txBytes < 4)
+    {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    res = wait_OK(buffer, timeout);
 
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
     return res;
@@ -202,6 +247,44 @@ esp_err_t at_csosend(int socket, char *data, char *buffer)
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
 
     return ESP_OK;
+}
+
+esp_err_t at_csosend_wait_SEND(int socket, char *data, char *buffer)
+{
+    esp_err_t res = ESP_FAIL;
+
+    char buf[14];
+    int len_data = strlen(data);
+
+    snprintf(buf, sizeof(buf), "AT+CSOSEND=%d,", socket);
+    int txBytes = uart_write_bytes(UART_NUM_1, buf, strlen(buf));
+    if (txBytes < 4)
+    {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    snprintf(buf, sizeof(buf), "%d,", len_data * 2);
+    txBytes = uart_write_bytes(UART_NUM_1, buf, strlen(buf));
+    if (txBytes < 3)
+    {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    for (int i = 0; i < len_data; i++)
+    {
+        snprintf(buf, 3, "%02x", data[i]);
+        txBytes = uart_write_bytes(UART_NUM_1, buf, 2);
+        if (txBytes < 2)
+        {
+            return ESP_ERR_INVALID_SIZE;
+        }
+    }
+    txBytes = uart_write_bytes(UART_NUM_1, "\r", 1);
+
+    res = wait_string(buffer, "SEND:", 30000 / portTICK_PERIOD_MS);
+
+    ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
+
+    return res;
 }
 
 void modem_task(void *arg)
@@ -324,7 +407,7 @@ void modem_task(void *arg)
             }
 
             // Reset and Set Phone Functionality
-            if ((try_counter % 5) == 0) // if fail restart sim
+            if ((try_counter % 3) == 0) // if fail restart sim
             {
                 if (try_counter == 10)
                 {
@@ -571,14 +654,33 @@ void modem_task(void *arg)
 
             strcpy(net_status_current, "Send data...");
 
-            ee = at_reply_wait_OK("AT+CSOSENDFLAG=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-
             int socket = 0;
 
-            ee = at_reply_wait_OK("AT+CSOC=1,1,1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+            int port = get_menu_id("tcpport");
+            int udpport = get_menu_id("udpport");
+
+            int protocol = 1; // TCP = 1, UDP =2
+
+            if (port > 0)
+            {
+                protocol = 1;
+                ee = at_reply_wait_OK("AT+CSOSENDFLAG=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+            }
+            else if (udpport > 0)
+            {
+                protocol = 2;
+                port = udpport;
+            }
+            else
+            {
+                break;
+            }
+
+            snprintf(send_data, sizeof(send_data), "AT+CSOC=1,%i,1\r\n", protocol);
+            at_reply_wait_OK(send_data, (char *)data, 1000 / portTICK_PERIOD_MS); // Create socket
             if (ee != ESP_OK)
             {
-                ESP_LOGW(TAG, "AT+CSOC=1,1,1");
+                ESP_LOGW(TAG, "AT+CSOC");
             }
             else
             {
@@ -587,7 +689,6 @@ void modem_task(void *arg)
 
                 ESP_LOGI(TAG, "Socket %i connect...", socket);
 
-                int port = get_menu_id("tcpport");
                 int ip = get_menu_id("ip");
 
                 try_counter = 3;
@@ -617,9 +718,12 @@ void modem_task(void *arg)
 
                         ESP_LOGI(TAG, "Send...");
 
-                        ee = at_csosend(socket, send_data, (char *)data);
+                        ee = at_csosend_wait_SEND(socket, send_data, (char *)data);
                         if (ee == ESP_OK)
                         {
+                            // print_atcmd("AT+CSOACK\r\n", (char *)data);
+                            // vTaskDelay(2000 / portTICK_PERIOD_MS);
+
                             result.measure.d_nbiot_send_succes = true;
                             break;
                         }
