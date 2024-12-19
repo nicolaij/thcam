@@ -97,7 +97,7 @@ esp_err_t wait_string(char *buffer, const char *wait, TickType_t ticks_to_wait)
         {
             return ESP_FAIL;
         }
-    } while((esp_timer_get_time() - start_time) < ticks_to_wait * portTICK_PERIOD_MS * 1000);
+    } while ((esp_timer_get_time() - start_time) < ticks_to_wait * portTICK_PERIOD_MS * 1000);
 
     return res;
 }
@@ -322,23 +322,18 @@ void modem_task(void *arg)
     ESP_ERROR_CHECK(uart_param_config(UART_NUM_1, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_1, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
-    int try_counter = 1;
+    int try_counter = 0;
 
     char datetime[24];
 
-    EventBits_t uxBits;
-
     strcpy(net_status_current, "OFF");
+    result.measure.d_nbiot_error = true;
+    int d_nbiot_error_counter = 5;
 
     while (1)
     {
         /* Ждем необходимости запуска передачи, либо зарядка*/
-        uxBits = xEventGroupWaitBits(
-            ready_event_group,          /* The event group being tested. */
-            NEED_TRANSMIT | NOW_CHARGE, /* The bits within the event group to wait for. */
-            pdFALSE,                    /* BIT_0 & BIT_1 should be cleared before returning. */
-            pdFALSE,                    /* Don't wait for both bits, either bit will do. */
-            portMAX_DELAY);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Ожидаем уведомления беcконечно, для повторного опроса
 
         while (1) // повторы опроса модуля
         {
@@ -350,6 +345,11 @@ void modem_task(void *arg)
             if (ee != ESP_OK)
             {
                 ESP_LOGW(TAG, "Modem not reply");
+                strcpy(net_status_current, "Modem not reply");
+
+                if ((xEventGroupGetBits(status_event_group) & END_WORK) || d_nbiot_error_counter-- == 0)
+                    break;
+
                 // power on
                 nbiot_power_pin(1000 / portTICK_PERIOD_MS);
 
@@ -358,78 +358,70 @@ void modem_task(void *arg)
             }
 
             // если запускаем терминал - стоп работа с модулем
-            while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+            if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
             {
-                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                break;
             }
-
-            if (strnstr(net_status_current, "Error", sizeof(net_status_current)) == NULL) // Если ошибка SIM - то не перезаписываем ее
-                strcpy(net_status_current, "Check SIM...");
 
             ee = at_reply_wait("ATE1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
 
             // Battery Charge
             int cbc[2] = {-1, -1};
-            ee = at_reply_get("AT+CBC\r\n", "CBC:", (char *)data, cbc, 2, 1000 / portTICK_PERIOD_MS);
-            result.measure.nbbattery = cbc[1] / 1000.0;
-            if (ee != ESP_OK)
-            {
-                ESP_LOGW(TAG, "AT+CBC");
-                vTaskDelay(1000 / portTICK_PERIOD_MS);
-            }
-            else
-            {
-                // Зарядка окончена
-                if (cbc[1] >= get_menu_id("ubatt"))
-                {
-                    ESP_LOGI(TAG, "Charge complete");
-                    xEventGroupSetBits(ready_event_group, CHARGE_COMPLETE);
-                    stop_charge();
 
-                    if (get_charge() == 0)
-                        break;
+            do // loop when charge
+            {
+                ee = at_reply_get("AT+CBC\r\n", "CBC:", (char *)data, cbc, 2, 1000 / portTICK_PERIOD_MS);
+                result.measure.nbbattery = cbc[1] / 1000.0;
+                if (ee != ESP_OK)
+                {
+                    ESP_LOGW(TAG, "AT+CBC");
+                    vTaskDelay(1000 / portTICK_PERIOD_MS);
                 }
-            }
-
-            // если была зарядка
-            if (uxBits & NOW_CHARGE)
-            {
-                if (get_charge() == 0) // зарядка окончена
+                else
                 {
-                    // STOP
-                    break;
-                }
-
-                ESP_LOGI(TAG, "Modem Minimum functionality");
-                at_reply_wait("AT+CFUN=0\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
-                vTaskDelay(30000 / portTICK_PERIOD_MS);
-                continue;
-            }
-
-            // Reset and Set Phone Functionality
-            if ((try_counter % 3) == 0) // if fail restart sim
-            {
-                if (try_counter == 10)
-                {
-                    // STOP
-                    break;
+                    // Зарядка окончена
+                    if (cbc[1] >= get_menu_id("ubatt"))
+                    {
+                        ESP_LOGI(TAG, "Charge complete");
+                        xEventGroupSetBits(status_event_group, CHARGE_COMPLETE);
+                    };
                 };
 
-                ESP_LOGI(TAG, "Modem CFUN Reset");
-                at_reply_wait("AT+CFUN=0\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
-                vTaskDelay(5000 / portTICK_PERIOD_MS);
-                at_reply_wait("AT+CFUN=1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
-                vTaskDelay(5000 / portTICK_PERIOD_MS);
+                if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
+                {
+                    vTaskDelay(25000 / portTICK_PERIOD_MS);
+                }
+
+            } while (((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge()) && (xEventGroupGetBits(status_event_group) & NB_TERMINAL) == 0);
+
+            // если запускаем терминал - стоп работа с модулем
+            if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
+            {
+                break;
             }
+
+            if (strnstr(net_status_current, "Error", sizeof(net_status_current)) == NULL) // Если ошибка SIM - то не перезаписываем ее
+                strcpy(net_status_current, "Check SIM...");
 
             // Enter PIN
             ee = at_reply_wait("AT+CPIN?\r\n", "CPIN: READY", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
                 strcpy(net_status_current, "SIM Error!");
-                result.measure.d_nbiot_sim_error = true;
+                result.measure.d_nbiot_error = true;
                 try_counter++;
                 ESP_LOGW(TAG, "CPIN:\n%s", data);
+
+                // Reset and Set Phone Functionality
+                if ((try_counter % 3) == 0) // if fail restart sim
+                {
+                    ESP_LOGI(TAG, "Modem CFUN Reset");
+                    at_reply_wait("AT+CFUN=0\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
+                    vTaskDelay(5000 / portTICK_PERIOD_MS);
+                    at_reply_wait("AT+CFUN=1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
+                    vTaskDelay(5000 / portTICK_PERIOD_MS);
+                }
+
                 vTaskDelay(1000 / portTICK_PERIOD_MS);
                 continue;
             }
@@ -438,7 +430,7 @@ void modem_task(void *arg)
                 ESP_LOGI(TAG, "PIN OK");
             }
 
-            result.measure.d_nbiot_sim_error = false;
+            result.measure.d_nbiot_error = false;
             strcpy(net_status_current, "Network search...");
 
             // Network Registration Status
@@ -463,9 +455,9 @@ void modem_task(void *arg)
                 try_network--;
 
                 // если запускаем терминал - стоп работа с модулем
-                while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+                if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
                 {
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+                    break;
                 }
             }
 
@@ -612,9 +604,9 @@ void modem_task(void *arg)
             };
 
             // если запускаем терминал - стоп работа с модулем
-            while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+            if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
             {
-                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                break;
             }
 
             /*
@@ -714,7 +706,7 @@ void modem_task(void *arg)
                     {
                         // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
                         // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
-                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_id("id"), result.bootCount, datetime, OUT_MEASURE_VARS(result.measure));
+                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
                         ESP_LOGI(TAG, "Send...");
 
@@ -732,12 +724,6 @@ void modem_task(void *arg)
                     }
                     vTaskDelay(2000 / portTICK_PERIOD_MS);
                     try_counter--;
-
-                    // если запускаем терминал - стоп работа с модулем
-                    while (xEventGroupGetBits(ready_event_group) & NB_STOP)
-                    {
-                        vTaskDelay(1000 / portTICK_PERIOD_MS);
-                    }
                 }
 
                 // wait to transmit
@@ -747,19 +733,19 @@ void modem_task(void *arg)
             snprintf(send_data, sizeof(send_data), "AT+CSOCL=%i\r\n", socket);
             at_reply_wait_OK(send_data, (char *)data, 1000 / portTICK_PERIOD_MS); // CLOSE socket
             break;
-        }
+        };
 
         // если запускаем терминал - стоп работа с модулем
-        while (xEventGroupGetBits(ready_event_group) & NB_STOP)
+        if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
         {
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            continue;
         }
 
         // если есть бит END_WORK - то модуль уже выключили из main()
-        if ((xEventGroupGetBits(ready_event_group) & END_WORK) == 0)
+        if ((xEventGroupGetBits(status_event_group) & END_WORK) == 0)
         {
-            print_atcmd("AT+CPOWD=1\r\n", data);
-            strcpy(net_status_current, "Success OFF");
+            if (print_atcmd("AT+CPOWD=1\r\n", data) == ESP_OK)
+                strcpy(net_status_current, "Success OFF");
             // print_atcmd("AT+CFUN=0\r\n", data);
         }
         else
@@ -767,8 +753,7 @@ void modem_task(void *arg)
             strcpy(net_status_current, "Extern OFF");
         }
 
-        xEventGroupSetBits(ready_event_group, END_RADIO_SLEEP);
-        xEventGroupClearBits(ready_event_group, NEED_TRANSMIT | NOW_CHARGE);
+        xEventGroupSetBits(status_event_group, END_RADIO);
     }
 }
 
@@ -777,4 +762,10 @@ void nbiot_power_pin(const TickType_t xTicksToDelay)
     gpio_set_level(MODEM_POWER, 0);
     vTaskDelay(xTicksToDelay);
     gpio_set_level(MODEM_POWER, 1);
-}
+};
+
+void nbiot_power_off()
+{
+    ESP_LOGW("main", "Force power off NB-IoT");
+    nbiot_power_pin(2000 / portTICK_PERIOD_MS);
+};
