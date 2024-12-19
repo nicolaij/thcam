@@ -1,0 +1,392 @@
+#include "main.h"
+
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+
+#include "onewire_bus.h"
+#include "ds18b20.h"
+
+RTC_DATA_ATTR uint64_t water_temp_id;
+
+RTC_DATA_ATTR uint8_t th_sensor;
+
+#include "driver/i2c_master.h"
+
+i2c_master_dev_handle_t th_handle;
+
+i2c_master_dev_handle_t lsm303A_handle;
+i2c_master_dev_handle_t lsm303M_handle;
+
+#include "driver/temperature_sensor.h"
+
+#include "bme280.h"
+s8 BME280_I2C_bus_write(u8 dev_addr, u8 reg_addr, u8 *reg_data, u8 cnt);
+s8 BME280_I2C_bus_read(u8 dev_addr, u8 reg_addr, u8 *reg_data, u8 cnt);
+void BME280_delay_msek(u32 msek);
+#define TAG_BME280 "BME280"
+
+#include "LSM303DLHC.h"
+
+float get_temperature_sensor()
+{
+    float internal_temp = 0;
+    ESP_LOGD("main", "Initializing Temperature sensor");
+
+    temperature_sensor_handle_t temp_sensor = NULL;
+    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+
+    ESP_ERROR_CHECK(temperature_sensor_install(&temp_sensor_config, &temp_sensor));
+    ESP_ERROR_CHECK(temperature_sensor_enable(temp_sensor));
+
+    ESP_ERROR_CHECK(temperature_sensor_get_celsius(temp_sensor, &internal_temp));
+
+    ESP_ERROR_CHECK(temperature_sensor_disable(temp_sensor));
+    ESP_ERROR_CHECK(temperature_sensor_uninstall(temp_sensor));
+
+    ESP_LOGI("temperature_sensor", "Internal temperature:  %.01f°C", internal_temp);
+    return internal_temp;
+};
+
+void i2c_task(void *arg)
+{
+
+    // i2c
+    i2c_master_bus_config_t i2c_mst_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_NUM_0,
+        .scl_io_num = SCL_PIN,
+        .sda_io_num = SDA_PIN,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+
+    esp_err_t err_rc;
+
+    i2c_master_bus_handle_t i2cbus_handle;
+
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &i2cbus_handle));
+
+    if (th_sensor != BME280_I2C_ADDRESS1)
+    {
+        th_sensor = 0x40; // HTU21
+    }
+
+    i2c_device_config_t dev_th_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = th_sensor,
+        .scl_speed_hz = 400000,
+    };
+
+    // LSM303M
+    i2c_device_config_t dev_m_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = LSM303DLHC_ADDRESS_M,
+        .scl_speed_hz = 400000,
+    };
+    i2c_device_config_t dev_a_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = LSM303DLHC_ADDRESS_A,
+        .scl_speed_hz = 400000,
+    };
+
+    int try = 4;
+    result.measure.d_thsensor_error = true;
+    do
+    {
+        try--;
+        ESP_LOGD("THCAM", "try %d", dev_th_cfg.device_address);
+        err_rc = i2c_master_probe(i2cbus_handle, dev_th_cfg.device_address, 10);
+        if (err_rc != ESP_OK)
+        {
+            if (try == 2)
+            {
+                if (th_sensor == dev_th_cfg.device_address)
+                {
+                    if (dev_th_cfg.device_address == BME280_I2C_ADDRESS1)
+                    {
+                        dev_th_cfg.device_address = 0x40;
+                    }
+                    else if (dev_th_cfg.device_address == 0x40)
+                    {
+                        dev_th_cfg.device_address = BME280_I2C_ADDRESS1;
+                    }
+                }
+            }
+            vTaskDelay(1);
+        }
+    } while (err_rc != ESP_OK && try > 0);
+
+    if (err_rc == ESP_OK) // Датчик TH найден!
+    {
+        th_sensor = dev_th_cfg.device_address;
+        result.measure.d_thsensor_error = false;
+        xTaskNotify(xTaskGetCurrentTaskHandle(), (1 << BIT_NOTYFY_SENSOR_TH), eSetBits);
+    }
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_th_cfg, &th_handle));
+
+    try = 2;
+    result.measure.d_mag_sensor_error = true;
+    do
+    {
+        try--;
+        ESP_LOGD("LSM303", "try %d", dev_m_cfg.device_address);
+        err_rc = i2c_master_probe(i2cbus_handle, dev_m_cfg.device_address, 10);
+        if (err_rc != ESP_OK)
+        {
+            vTaskDelay(1);
+        }
+        else
+        {
+            xTaskNotify(xTaskGetCurrentTaskHandle(), (1 << BIT_NOTYFY_SENSOR_MAGACC), eSetBits);
+            result.measure.d_mag_sensor_error = false;
+        };
+    } while (err_rc != ESP_OK && try > 0);
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_m_cfg, &lsm303M_handle));
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_a_cfg, &lsm303A_handle));
+
+    while (1)
+    {
+        uint32_t ulNotifiedValue;
+
+        /* Ожидание оповещения. */
+        BaseType_t xResult = xTaskNotifyWait(pdFALSE,                                           /* Не очищать биты на входе. */
+                                             ULONG_MAX & ~(1 << BIT_NOTYFY_SENSOR_MAGACC_CONT), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
+                                             &ulNotifiedValue,                                  /* Сохраняет значение оповещения. */
+                                             1000 / portTICK_PERIOD_MS);
+
+        if ((ulNotifiedValue & (1 << BIT_NOTYFY_SENSOR_TH)) && result.measure.d_thsensor_error == false)
+        {
+            if (th_sensor == 0x40) // HTU21
+            {
+                uint8_t cmd = 0xfe; // Soft Reset
+                uint8_t buffer[4];
+                ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(th_handle, &cmd, 1, 10));
+
+                vTaskDelay(20 / portTICK_PERIOD_MS); // The soft reset takes less than 15ms.
+
+                cmd = 0xe3; // Trigger Temperature Measurement
+                ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(th_handle, &cmd, 1, 10));
+                vTaskDelay(50 / portTICK_PERIOD_MS);
+                err_rc = i2c_master_receive(th_handle, buffer, 3, 10);
+
+                if (err_rc == ESP_OK)
+                {
+                    if ((buffer[1] & 0b10) == 0) // Status (‘0’: temperature, ‘1’: humidity)
+                    {
+                        result.measure.temp = -46.85 + 175.72 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
+                    }
+                }
+
+                cmd = 0xe5; // Trigger Humidity Measurement
+                ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(th_handle, &cmd, 1, 10));
+                vTaskDelay(50 / portTICK_PERIOD_MS);
+                err_rc = i2c_master_receive(th_handle, buffer, 3, 100);
+                if (err_rc == ESP_OK)
+                {
+                    if ((buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)
+                    {
+                        result.measure.humidity = -6.0 + 125.0 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
+                    }
+                }
+
+                ESP_LOGI("HTU21", "Read from I2C: T=%.01f°C, H=%.01f%%", result.measure.temp, result.measure.humidity);
+            }
+
+            if (th_sensor == BME280_I2C_ADDRESS1) // BME280
+            {
+                dev_th_cfg.device_address = BME280_I2C_ADDRESS1;
+
+                struct bme280_t bme280 = {
+                    .bus_write = BME280_I2C_bus_write,
+                    .bus_read = BME280_I2C_bus_read,
+                    .dev_addr = BME280_I2C_ADDRESS1,
+                    .delay_msec = BME280_delay_msek};
+
+                s32 com_rslt;
+                s32 v_uncomp_pressure_s32;
+                s32 v_uncomp_temperature_s32;
+                s32 v_uncomp_humidity_s32;
+
+                com_rslt = bme280_init(&bme280);
+
+                com_rslt += bme280_set_oversamp_pressure(BME280_OVERSAMP_1X);
+                com_rslt += bme280_set_oversamp_temperature(BME280_OVERSAMP_1X);
+                com_rslt += bme280_set_oversamp_humidity(BME280_OVERSAMP_1X);
+
+                com_rslt += bme280_set_filter(BME280_FILTER_COEFF_OFF);
+                if (com_rslt == SUCCESS)
+                {
+                    com_rslt = bme280_get_forced_uncomp_pressure_temperature_humidity(
+                        &v_uncomp_pressure_s32, &v_uncomp_temperature_s32, &v_uncomp_humidity_s32);
+
+                    if (com_rslt == SUCCESS)
+                    {
+                        result.measure.temp = bme280_compensate_temperature_double(v_uncomp_temperature_s32);
+                        result.measure.pressure = bme280_compensate_pressure_double(v_uncomp_pressure_s32) / 100; // Pa -> hPa
+                        result.measure.humidity = bme280_compensate_humidity_double(v_uncomp_humidity_s32);
+                        ESP_LOGI(TAG_BME280, "%.2f degC / %.3f hPa / %.3f %%",
+                                 result.measure.temp,
+                                 result.measure.pressure,
+                                 result.measure.humidity);
+
+                        result.measure.d_thsensor_error = false;
+                    }
+                    else
+                    {
+                        result.measure.d_thsensor_error = true;
+                        ESP_LOGE(TAG_BME280, "measure error. code: %d", com_rslt);
+                    }
+                }
+                else
+                {
+                    result.measure.d_thsensor_error = true;
+                    ESP_LOGE(TAG_BME280, "init or setting error. code: %d", com_rslt);
+                }
+            }
+        };
+
+        if ((ulNotifiedValue & (1 << BIT_NOTYFY_SENSOR_MAGACC)) && result.measure.d_mag_sensor_error == false)
+        {
+            LSM303DLHC_initialize();
+            LSM303DLHC_setAccelFullScale(4); // 4G
+
+            // set accel data rate to 1Hz
+            LSM303DLHC_setAccelOutputDataRate(1);
+            LSM303DLHC_setMagOutputDataRate(1);
+            LSM303DLHC_setMagGain(_lsm303Mag_Gauss_LSB_XY);
+            if (ulNotifiedValue & (1 << BIT_NOTYFY_SENSOR_MAGACC_CONT))
+            {
+                LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
+                nbiot_power_off();
+            }
+            else
+            {
+                LSM303DLHC_setMagMode(LSM303DLHC_MD_SINGLE);
+            }
+        };
+
+        if ((ulNotifiedValue & ((1 << BIT_NOTYFY_SENSOR_MAGACC) | (1 << BIT_NOTYFY_SENSOR_MAGACC_CONT))) && result.measure.d_mag_sensor_error == false)
+        {
+            esp_err_t ret;
+            int16_t ax, ay, az;
+            int16_t mx, my, mz;
+            ret = LSM303DLHC_getAcceleration(&ax, &ay, &az);
+            ret = LSM303DLHC_getMag(&mx, &my, &mz);
+            if (ret != ESP_OK)
+            {
+                result.measure.d_mag_sensor_error = true;
+            }
+            //  Calculation by scale
+            result.measure.acc[0] = (float)(ax >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
+            result.measure.acc[1] = (float)(ay >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
+            result.measure.acc[2] = (float)(az >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
+            result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
+            result.measure.mag[1] = (float)my / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
+            result.measure.mag[2] = (float)mz / _lsm303Mag_Gauss_LSB_Z * SENSORS_GAUSS_TO_MICROTESLA;
+            ESP_LOGI("LSM303", "acc=%2.1f %2.1f %2.1f; mag=%3.1f %3.1f %3.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
+
+            xEventGroupSetBits(status_event_group, END_MAG_SENSOR);
+        };
+    };
+};
+
+void dallas_task(void *arg)
+{
+    // install new 1-wire bus
+    onewire_bus_handle_t bus;
+    onewire_bus_config_t bus_config = {
+        .bus_gpio_num = PIN_ONEWARE,
+    };
+    onewire_bus_rmt_config_t rmt_config = {
+        .max_rx_bytes = 10, // 1byte ROM command + 8byte ROM number + 1byte device command
+    };
+    ESP_ERROR_CHECK(onewire_new_bus_rmt(&bus_config, &rmt_config, &bus));
+    ESP_LOGI("DS18B20", "1-Wire bus installed on GPIO%d", PIN_ONEWARE);
+
+    int ds18b20_device_num = 0;
+    ds18b20_device_handle_t ds18b20s[ONEWIRE_MAX_DS18B20];
+    onewire_device_iter_handle_t iter = NULL;
+    onewire_device_t next_onewire_device;
+    esp_err_t search_result = ESP_OK;
+    result.measure.d_dallas_sensor_error = true;
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Ожидаем уведомления безконечно, для повторного поиска
+
+        if (water_temp_id != 0)
+        {
+            ds18b20_config_t ds_cfg = {};
+            next_onewire_device.bus = bus;
+            next_onewire_device.address = water_temp_id;
+            if (ds18b20_new_device(&next_onewire_device, &ds_cfg, &ds18b20s[0]) == ESP_OK)
+            {
+                ESP_LOGI("DS18B20", "DS18B20[%d], address: %016llX", 0, water_temp_id);
+            };
+            ds18b20_device_num = 1;
+        }
+        else
+        {
+            // create 1-wire device iterator, which is used for device search
+            ESP_ERROR_CHECK(onewire_new_device_iter(bus, &iter));
+            ESP_LOGI("DS18B20", "Device iterator created, start searching...");
+            do
+            {
+                search_result = onewire_device_iter_get_next(iter, &next_onewire_device);
+                if (search_result == ESP_OK)
+                { // found a new device, let's check if we can upgrade it to a DS18B20
+                    ds18b20_config_t ds_cfg = {};
+                    if (ds18b20_new_device(&next_onewire_device, &ds_cfg, &ds18b20s[0]) == ESP_OK)
+                    {
+                        water_temp_id = next_onewire_device.address;
+                        ESP_LOGI("DS18B20", "Found a DS18B20[%d], address: %016llX", 0, next_onewire_device.address);
+                        ds18b20_device_num = 1;
+                        // if (ds18b20_device_num >= ONEWIRE_MAX_DS18B20)
+                        //{
+                        // ESP_LOGI("DS18B20", "Max DS18B20 number reached, stop searching...");
+                        //}
+                    }
+                    else
+                    {
+                        ESP_LOGI("DS18B20", "Found an unknown device, address: %016llX", next_onewire_device.address);
+                    }
+                }
+            } while (search_result != ESP_ERR_NOT_FOUND);
+            ESP_ERROR_CHECK(onewire_del_device_iter(iter));
+            ESP_LOGI("DS18B20", "Searching done, %d DS18B20 device(s) found", ds18b20_device_num);
+
+            // set resolution for all DS18B20s
+            for (int i = 0; i < ds18b20_device_num; i++)
+            {
+                // set resolution
+                ESP_ERROR_CHECK(ds18b20_set_resolution(ds18b20s[i], DS18B20_RESOLUTION_12B));
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+
+        // get temperature from sensors one by one
+        float temperature;
+        esp_err_t ret;
+        while (water_temp_id != 0)
+        {
+            ESP_ERROR_CHECK(ds18b20_trigger_temperature_conversion(ds18b20s[0]));
+            ret = ds18b20_get_temperature(ds18b20s[0], &temperature);
+            if (ret == ESP_OK)
+            {
+                ESP_LOGI("DS18B20", "temperature read from DS18B20: %.2fC", temperature);
+                result.measure.water_temp = temperature;
+                result.measure.d_dallas_sensor_error = false;
+
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Ожидаем уведомления безконечно, для повторного опроса
+            }
+            else
+            {
+                ESP_LOGW("DS18B20", "Error read from DS18B20");
+                water_temp_id = 0;
+                break;
+            };
+        }
+    }
+};

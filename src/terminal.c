@@ -7,7 +7,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-uint8_t buffer[256];
+uint8_t serialbuffer[256];
 
 char printbuf[1024];
 
@@ -18,6 +18,7 @@ nvs_handle_t my_handle;
 int NB_terminal_mode = 0;
 
 extern TaskHandle_t xHandleNB;
+extern TaskHandle_t xTaskI2C;
 
 menu_t menu[] = {
     {.id = "id", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
@@ -177,7 +178,7 @@ int get_menu_html(char *buf)
 
 void console_task(void *arg)
 {
-    uint8_t *data = buffer;
+    uint8_t *data = serialbuffer;
 
     const uart_config_t uart_config = {
         .baud_rate = 115200,
@@ -188,7 +189,7 @@ void console_task(void *arg)
         .source_clk = UART_SCLK_DEFAULT,
     };
     // We won't use a buffer for sending data.
-    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, sizeof(buffer), 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, sizeof(serialbuffer), 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
@@ -207,7 +208,6 @@ void console_task(void *arg)
                 uart_write_bytes(UART_NUM_1, data, rxBytes);
                 // ESP_LOGE(TAG, "%c(%02x)", *data, *data);
                 // print_atcmd("ATI", (char*)data);
-                xEventGroupSetBits(ready_event_group, NBTERMINAL_ACTIVE);
             }
 
             while (uart_read_bytes(UART_NUM_1, data, 1, 50 / portTICK_PERIOD_MS) > 0)
@@ -221,15 +221,17 @@ void console_task(void *arg)
         {
             if (data[rxBytes - 1] == '\n')
             {
+                xEventGroupSetBits(status_event_group, SERIAL_TERMINAL_ACTIVE);
+
                 if (data[rxBytes - 2] == '\r')
                 {
                     data[rxBytes - 2] = 0;
                 };
 
                 data[rxBytes - 1] = 0;
-                ESP_LOGD(TAG, "Read bytes: '%s'", buffer);
+                ESP_LOGD(TAG, "Read bytes: '%s'", serialbuffer);
                 // ESP_LOG_BUFFER_HEXDUMP(TAG, data, rxBytes, ESP_LOG_INFO);
-                data = buffer;
+                data = serialbuffer;
                 int n = atoi((const char *)data);
                 if (enter_value > 0)
                 {
@@ -281,19 +283,15 @@ void console_task(void *arg)
                     }
                     else if (n == sizeof(menu) / sizeof(menu_t) + 1) // выводим историю
                     {
-                        int pos = bootCount % HISTORY_SIZE;
-                        int end = 0;
+                        int pos = history_pos + HISTORY_SIZE;
+                        int end = history_pos;
                         ESP_LOGI("menu", "-------------------------------------------");
-
+                        ESP_LOGI("menu", "bootcount, " OUT_MEASURE_HEADERS);
                         while (pos > end)
                         {
-                            ESP_LOGI("menu", "%3i: " OUT_MEASURE_FORMATS, pos, OUT_MEASURE_VARS(history[pos]));
+                            int indx = pos % HISTORY_SIZE;
+                            ESP_LOGI("menu", "%3i, " OUT_MEASURE_FORMATS, history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
                             pos--;
-                            if (pos == 0 && bootCount > (bootCount % HISTORY_SIZE))
-                            {
-                                pos = HISTORY_SIZE - 1;
-                                end = (bootCount % HISTORY_SIZE);
-                            }
                         }
 
                         ESP_LOGI("menu", "-------------------------------------------");
@@ -302,8 +300,18 @@ void console_task(void *arg)
                     else if (n == sizeof(menu) / sizeof(menu_t) + 2) // AT терминал NBIoT
                     {
                         NB_terminal_mode = 1;
-                        xEventGroupSetBits(ready_event_group, NB_STOP);
+                        xEventGroupSetBits(status_event_group, NB_TERMINAL);
+                        xTaskNotifyGive(xHandleNB); //если уже уснули
                         // vTaskSuspend(xHandleNB); // Suspend NBIot task
+                        wait_max_counter = 3;
+                        enter_value = 0;
+                    }
+                    else if (n == sizeof(menu) / sizeof(menu_t) + 3) // Непрерывный опрос MAG/ACC
+                    {
+                        xTaskNotify(xTaskI2C, (1 << BIT_NOTYFY_SENSOR_MAGACC) | (1 << BIT_NOTYFY_SENSOR_MAGACC_CONT), eSetBits);
+                        xEventGroupSetBits(status_event_group, NB_TERMINAL);
+                        nbiot_power_off();
+                        wait_max_counter = 3;
                         enter_value = 0;
                     }
                     else
@@ -312,7 +320,7 @@ void console_task(void *arg)
                         struct tm *localtm = localtime(&result.ttime);
                         strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
-                        ESP_LOGI("result", OUT_JSON, get_menu_id("id"), result.bootCount, datetime, OUT_MEASURE_VARS(result.measure));
+                        ESP_LOGI("result", OUT_JSON, get_menu_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
                         // get_menu_json(printbuf);
                         // ESP_LOGI("result", "%s", printbuf);
 
@@ -322,9 +330,9 @@ void console_task(void *arg)
                         {
                             ESP_LOGI("menu", "%2i. %s: %li %s", i + 1, menu[i].name, menu[i].val, menu[i].izm);
                         }
-                        ESP_LOGI("menu", "%2i. История: %i", i + 1, bootCount);
-                        ESP_LOGI("menu", "%2i. AT терминал NBIoT", i + 2);
-
+                        ESP_LOGI("menu", "%2i. История: %i", ++i, bootCount);
+                        ESP_LOGI("menu", "%2i. AT терминал NBIoT", ++i);
+                        ESP_LOGI("menu", "%2i. Непреравный опрос Mag/Acc", ++i);
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = 0;
                     }
@@ -333,8 +341,8 @@ void console_task(void *arg)
             else
             {
                 data = data + rxBytes;
-                if (data >= buffer + sizeof(buffer))
-                    data = buffer;
+                if (data >= serialbuffer + sizeof(serialbuffer))
+                    data = serialbuffer;
             }
         }
     }

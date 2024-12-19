@@ -6,7 +6,7 @@ import os
 import logging
 import sys
 
-HOST = '10.179.40.11'
+HOST = '10.179.40.20'
 PORT = 48885
 FASTLOADDIR = 'o:\\СОДК\\Сервер\\sodk\\'
 DATASIZE = 1024
@@ -50,7 +50,6 @@ inputstring = '{"id":"cam2","num":10,"dt":"2024-09-25 15:14:34","RSSI":-93,"NBba
 
 
 def write_csv(js):
-
     csvFilename = '{}_{:%Y-%m}.csv'.format(js["id"], datetime.datetime.now())
     try:
         with open(csvFilename, 'r', newline='') as csvfile:
@@ -60,9 +59,14 @@ def write_csv(js):
             csvfile.write("dt;num;")
             for key in js:
                 if (key != "id" and key != "num" and key != "dt"):
-                    csvfile.write(key + ";")
-            csvfile.write("\n")
+                    print(key)
+                    if type(js[key]) is list:
+                        if (len(js[key]) == 3):
+                            csvfile.write("{}X;{}Y;{}Z;".format(key, key, key))
+                    else:
+                        csvfile.write("{};".format(key))
 
+            csvfile.write("\n")
         pass
 
     try:
@@ -70,7 +74,12 @@ def write_csv(js):
             csvfile.write("{};{};".format(js["dt"], js["num"]))
             for key in js:
                 if (key != "id" and key != "num" and key != "dt"):
-                    csvfile.write(str(js[key]).replace('.', ',') + ";")
+                    s = js[key]
+                    if type(s) is list:
+                        if (len(s) == 3):
+                            csvfile.write("{};{};{};".format(s[0], s[1], s[2]))
+                    else:
+                        csvfile.write("{};".format(s))
             csvfile.write("\n")
 
     except Exception as e:
@@ -93,9 +102,13 @@ def get_name(id):
 
     # open the file in read mode
 
-    with open(file, 'r') as file:
-        # read lines from the file
-        lines = file.readlines()
+    try:
+        with open(file, 'r') as file:
+            # read lines from the file
+            lines = file.readlines()
+    except Exception as e:
+        logging.error(e)
+        return
 
     res = {}
 

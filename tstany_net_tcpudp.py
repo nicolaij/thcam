@@ -44,37 +44,40 @@ def parse_msg(msg):
 # create csv data file
 # {"id":"12.1","num":1,"dt":"2000-12-12 00:00:58","U":542,"R":299999,"Ub1":9.764,"Ub0":12.035,"U0":0,"in":1,"T":28.7,"rssi":-63}
 
-def write_csv():
-
-    d = "{\"id\"=\"cam1\",\"rssi\"=23,\"NBbatt\"=343.4,\"batt\"=23,\"adclight\"=42,\"adcwater\"=24,\"adcwater2\"=64,\"cputemp\"=7,\"temp\"=999.6,\"humidity\"=33}"
-    js = json.loads(d)
-    dataname = ['temp', 'humidity', 'adclight', 'adcwater', 'adcwater2', 'cputemp', 'batt', 'NBbatt', 'rssi']
-    for d in dataname:
-        try:
-            if js[d] == '':
-                js[d] = ''
-        except:
-            js[d] = ''
-            pass
-
+def write_csv(js):
     csvFilename = '{}_{:%Y-%m}.csv'.format(js["id"], datetime.datetime.now())
     try:
         with open(csvFilename, 'r', newline='') as csvfile:
             n = csvfile.read(1)
     except:
         with open(csvFilename, 'w', newline='') as csvfile:
-            for x in dataname:
-                csvfile.write(x + ";")
+            csvfile.write("dt;num;")
+            for key in js:
+                if (key != "id" and key != "num" and key != "dt"):
+                    print(key)
+                    if type(js[key]) is list:
+                        if (len(js[key]) == 3):
+                            csvfile.write("{}X;{}Y;{}Z;".format(key, key, key))
+                    else:
+                        csvfile.write("{};".format(key))
 
             csvfile.write("\n")
         pass
 
     try:
         with open(csvFilename, 'a', newline='') as csvfile:
-            for x in dataname:
-                csvfile.write(str(js[x]).replace('.', ',') + ";")
-
+            csvfile.write("{};{};".format(js["dt"], js["num"]))
+            for key in js:
+                if (key != "id" and key != "num" and key != "dt"):
+                    s = js[key]
+                    print(key, ":", s)
+                    if type(s) is list:
+                        if (len(s) == 3):
+                            csvfile.write("{};{};{};".format(s[0], s[1], s[2]))
+                    else:
+                        csvfile.write("{};".format(s))
             csvfile.write("\n")
+
     except Exception as e:
         logging.error(e)
         pass
@@ -82,4 +85,6 @@ def write_csv():
 
 if __name__ == '__main__':
 
-    write_csv()
+    str = '{"id":"cam1","num":1,"dt":"1970-01-01 00:00:00","RSSI":  0,"Battery":0.000,"Light":   0,"Water":1492,"WaterTemp":0.0,"Temp":27.6,"Humidity":36.0,"Pressure":0.000,"Acc":[-0.1,0.0,9.8],"Mag":[-20.5,5.6,-57.7],"Flags":"0x0200"}'
+    j = json.loads(str)
+    write_csv(j)

@@ -19,17 +19,12 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "driver/ledc.h"
 
-#include "onewire_bus.h"
-#include "ds18b20.h"
-
-TaskHandle_t xTaskDallas = NULL;
-
-RTC_DATA_ATTR uint64_t water_temp_id;
-
 static const char *TAG = "DIO";
 
 #define QUEUE_LENGTH 1
 #define ITEM_SIZE sizeof(uint64_t)
+
+extern TaskHandle_t xTaskDallas;
 
 QueueHandle_t xQueue = NULL;
 uint8_t ucQueueStorageArea[QUEUE_LENGTH * ITEM_SIZE];
@@ -141,8 +136,7 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
 
     if (gpio_num == PIN_BATT)
     {
-        xEventGroupSetBitsFromISR(ready_event_group, NEED_WIFI, &xHigherPriorityTaskWoken);
-        xEventGroupSetBitsFromISR(ready_event_group, NOW_CHARGE, &xHigherPriorityTaskWoken);
+        xEventGroupSetBitsFromISR(status_event_group, NOW_CHARGE, &xHigherPriorityTaskWoken);
     }
 
     if (xHigherPriorityTaskWoken == pdTRUE)
@@ -679,9 +673,6 @@ void dio_init()
     ESP_ERROR_CHECK(gpio_config(&io_conf));
     ESP_ERROR_CHECK(gpio_isr_handler_add(PIN_BATT, gpio_isr_handler, (void *)PIN_BATT));
 
-    xTaskCreate(dallas_task, "dallas_task", 1024 * 6, NULL, configMAX_PRIORITIES - 10, &xTaskDallas);
-    // xTaskNotifyGive(xTaskDallas);
-
     cont_prepare();
     cont_measure1(true);
 
@@ -748,15 +739,16 @@ void dio_init()
     ESP_LOGI(TAG, "Light: %d; Water: %d (%c%c); Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER3), water1_mode, water2_mode, gpio_get_level(PIN_BATT));
 }
 
-void stop_charge()
-{
-    gpio_set_level(PIN_CHARGE_CONTROL, 1);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-};
-
 int get_charge()
 {
-    return gpio_get_level(PIN_BATT);
+    if (gpio_get_level(PIN_BATT))
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
 };
 
 uint64_t dio_sleep()
@@ -847,7 +839,9 @@ void btn_task(void *arg)
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     // configure GPIO with the given settings
-    gpio_config(&io_conf);
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     int debounce = 0;
 
@@ -857,7 +851,7 @@ void btn_task(void *arg)
     const int short_count = 4;
     const int long_count = 50;
 
-    vTaskDelay(pdMS_TO_TICKS(500));
+    //vTaskDelay(pdMS_TO_TICKS(500));
 
     while (true)
     {
@@ -880,7 +874,7 @@ void btn_task(void *arg)
                 ESP_LOGI("IO", "Button long press! %d", output + 1);
                 debounce = 0;
 
-                gpio_config_t io_conf = {};
+                //gpio_config_t io_conf = {};
                 /*
                                 if (++output > output_count)
                                 {
@@ -944,11 +938,10 @@ void btn_task(void *arg)
                 debounce = 0;
 
                 xTaskNotifyGive(xTaskDallas);
-
+                xTaskNotify(xTaskI2C, (1 << BIT_NOTYFY_SENSOR_TH) | (1 << BIT_NOTYFY_SENSOR_MAGACC), eSetBits);
                 cont_measure1(false);
 
-                xEventGroupSetBits(ready_event_group, NEED_WIFI);
-
+                xTaskNotifyGive(xHandleWifi); // включаем WiFi;
             };
         }
     }
@@ -1001,98 +994,3 @@ int getResult_Data(char *line, int data_pos)
 
     return l;
 }
-
-void dallas_task(void *arg)
-{
-    // install new 1-wire bus
-    onewire_bus_handle_t bus;
-    onewire_bus_config_t bus_config = {
-        .bus_gpio_num = PIN_ONEWARE,
-    };
-    onewire_bus_rmt_config_t rmt_config = {
-        .max_rx_bytes = 10, // 1byte ROM command + 8byte ROM number + 1byte device command
-    };
-    ESP_ERROR_CHECK(onewire_new_bus_rmt(&bus_config, &rmt_config, &bus));
-    ESP_LOGI(TAG, "1-Wire bus installed on GPIO%d", PIN_ONEWARE);
-
-    const int ds18b20_device_num = 1;
-    ds18b20_device_handle_t ds18b20s[ONEWIRE_MAX_DS18B20];
-    onewire_device_iter_handle_t iter = NULL;
-    onewire_device_t next_onewire_device;
-    esp_err_t search_result = ESP_OK;
-    while (1)
-    {
-        if (water_temp_id != 0)
-        {
-            ds18b20_config_t ds_cfg = {};
-            next_onewire_device.bus = bus;
-            next_onewire_device.address = water_temp_id;
-            if (ds18b20_new_device(&next_onewire_device, &ds_cfg, &ds18b20s[0]) == ESP_OK)
-            {
-                ESP_LOGI(TAG, "DS18B20[%d], address: %016llX", 0, water_temp_id);
-            };
-        }
-        else
-        {
-            // create 1-wire device iterator, which is used for device search
-            ESP_ERROR_CHECK(onewire_new_device_iter(bus, &iter));
-            ESP_LOGI(TAG, "Device iterator created, start searching...");
-            do
-            {
-                search_result = onewire_device_iter_get_next(iter, &next_onewire_device);
-                if (search_result == ESP_OK)
-                { // found a new device, let's check if we can upgrade it to a DS18B20
-                    ds18b20_config_t ds_cfg = {};
-                    if (ds18b20_new_device(&next_onewire_device, &ds_cfg, &ds18b20s[0]) == ESP_OK)
-                    {
-                        water_temp_id = next_onewire_device.address;
-                        ESP_LOGI(TAG, "Found a DS18B20[%d], address: %016llX", 0, next_onewire_device.address);
-                        // if (ds18b20_device_num >= ONEWIRE_MAX_DS18B20)
-                        //{
-                        // ESP_LOGI(TAG, "Max DS18B20 number reached, stop searching...");
-                        break;
-                        //}
-                    }
-                    else
-                    {
-                        ESP_LOGI(TAG, "Found an unknown device, address: %016llX", next_onewire_device.address);
-                    }
-                }
-            } while (search_result != ESP_ERR_NOT_FOUND);
-            ESP_ERROR_CHECK(onewire_del_device_iter(iter));
-            ESP_LOGI(TAG, "Searching done, %d DS18B20 device(s) found", ds18b20_device_num);
-
-            // set resolution for all DS18B20s
-            for (int i = 0; i < ds18b20_device_num; i++)
-            {
-                // set resolution
-                ESP_ERROR_CHECK(ds18b20_set_resolution(ds18b20s[i], DS18B20_RESOLUTION_12B));
-            }
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
-
-        // get temperature from sensors one by one
-        float temperature;
-        while (water_temp_id != 0)
-        {
-            for (int i = 0; i < ds18b20_device_num; i++)
-            {
-                ESP_ERROR_CHECK(ds18b20_trigger_temperature_conversion(ds18b20s[i]));
-                search_result = ds18b20_get_temperature(ds18b20s[i], &temperature);
-                if (search_result == ESP_OK)
-                {
-                    ESP_LOGI(TAG, "temperature read from DS18B20[%d]: %.2fC", i, temperature);
-                    result.measure.water_temp = temperature;
-                }
-                else
-                {
-                    water_temp_id = 0;
-                    break;
-                }
-            }
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        }
-        vTaskDelay(pdMS_TO_TICKS(3000));
-    }
-};

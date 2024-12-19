@@ -27752,3 +27752,6 @@
 2024-11-20 16:55:11,373 [DEBUG] New: <socket.socket fd=388, family=2, type=1, proto=0, laddr=('10.179.40.11', 48885)>
 2024-11-20 16:55:11,390 [DEBUG] Msg: <socket.socket fd=472, family=2, type=1, proto=0, laddr=('10.179.40.11', 48885), raddr=('172.30.239.10', 54371)>
 2024-11-20 16:55:11,391 [INFO ] ('172.30.239.10', 54371): b'{"id":"cam2","num":1655,"dt":"2024-11-20 16:54:41","RSSI":-85,"Battery":3.324,"Light":  93,"Water":  20,"Water2":   0,"Temp":24.8,"Humidity":33.3,"Pressure":973.455,"Flags":"0x00"}'
+2024-12-16 16:43:49,663 [INFO ] TCP/UDP server is running
+2024-12-16 16:43:49,685 [DEBUG] New: <socket.socket fd=376, family=2, type=1, proto=0, laddr=('10.179.40.11', 48885)>
+2024-12-16 16:43:49,685 [DEBUG] New: <socket.socket fd=384, family=2, type=2, proto=0, laddr=('10.179.40.11', 48885)>

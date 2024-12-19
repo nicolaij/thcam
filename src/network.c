@@ -79,6 +79,7 @@ void reset_sleep_timeout()
 {
     timeout_begin = esp_timer_get_time();
     // ESP_LOGV(TAGW, "Timeout reset");
+    xEventGroupSetBits(status_event_group, WIFI_ACTIVE);
 }
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -312,21 +313,21 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     struct tm *localtm = localtime(&result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), result.bootCount, datetime, OUT_MEASURE_VARS(result.measure));
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
     localtm = localtime(&old_result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>PREVIOUS DATA = ");
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), old_result.bootCount, datetime, OUT_MEASURE_VARS(old_result.measure));
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), old_result.measure.bootcount, datetime, OUT_MEASURE_VARS(old_result.measure));
 
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>STATUS = ");
 
-    if (xEventGroupGetBits(ready_event_group) & NOW_CHARGE || get_charge() == 1)
+    if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
     {
         l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>charge... <b>");
     }
 
-    if (xEventGroupGetBits(ready_event_group) & CHARGE_COMPLETE)
+    if (xEventGroupGetBits(status_event_group) & CHARGE_COMPLETE)
     {
         l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>Charge complete <b>");
     }
@@ -678,15 +679,9 @@ static httpd_handle_t start_webserver(void)
 
 void wifi_task(void *arg)
 {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Ожидаем уведомления безконечно, для запуска WiFi
 
-    xEventGroupWaitBits(
-        ready_event_group, /* The event group being tested. */
-        NEED_WIFI,         /* The bits within the event group to wait for. */
-        pdFALSE,           /* BIT_0 & BIT_1 should be cleared before returning. */
-        pdFALSE,
-        portMAX_DELAY);
-
-    xEventGroupClearBits(ready_event_group, WIFI_STOP);
+    xEventGroupClearBits(status_event_group, END_WIFI);
 
     s_wifi_event_group = xEventGroupCreate();
 
@@ -717,15 +712,15 @@ void wifi_task(void *arg)
     while (1)
     {
         // WiFi timeout
-        if (esp_timer_get_time() - timeout_begin > 6 * 60 * 1000000)
-        {
-            xEventGroupSetBits(ready_event_group, WIFI_STOP);
-        }
+        // if (esp_timer_get_time() - timeout_begin > 6 * 60 * 1000000)
+        //{
+        //    xEventGroupSetBits(status_event_group, WIFI_STOP);
+        //}
 
-        EventBits_t uxBits = xEventGroupGetBits(ready_event_group);
-        if (uxBits & END_WORK)
+        if (xEventGroupGetBits(status_event_group) & END_WORK)
         {
             esp_wifi_stop();
+            xEventGroupSetBits(status_event_group, END_WIFI);
         }
 
         if (restart == true)

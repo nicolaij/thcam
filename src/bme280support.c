@@ -12,7 +12,7 @@
 #define I2C_MASTER_ACK 0
 #define I2C_MASTER_NACK 1
 
-extern i2c_master_dev_handle_t dev_handle;
+extern i2c_master_dev_handle_t th_handle;
 
 uint8_t i2cbuf[128];
 
@@ -26,7 +26,7 @@ s8 BME280_I2C_bus_write(u8 dev_addr, u8 reg_addr, u8 *reg_data, u8 cnt)
 	if (cnt > 0 && cnt < 128)
 		memcpy(&i2cbuf[1], reg_data, cnt);
 
-	espRc = i2c_master_transmit(dev_handle, i2cbuf, cnt + 1, 10);
+	espRc = i2c_master_transmit(th_handle, i2cbuf, cnt + 1, 10);
 
 	if (espRc == ESP_OK)
 	{
@@ -63,7 +63,7 @@ s8 BME280_I2C_bus_read(u8 dev_addr, u8 reg_addr, u8 *reg_data, u8 cnt)
 
 		espRc = i2c_master_cmd_begin(I2C_NUM_0, cmd, 10 / portTICK_PERIOD_MS);
 	*/
-	espRc = i2c_master_transmit(dev_handle, &reg_addr, 1, 10);
+	espRc = i2c_master_transmit(th_handle, &reg_addr, 1, 10);
 	if (espRc == ESP_OK)
 	{
 		iError = SUCCESS;
@@ -74,7 +74,7 @@ s8 BME280_I2C_bus_read(u8 dev_addr, u8 reg_addr, u8 *reg_data, u8 cnt)
 		return (s8)iError;
 	}
 
-	espRc = i2c_master_receive(dev_handle, reg_data, cnt, 10);
+	espRc = i2c_master_receive(th_handle, reg_data, cnt, 10);
 	if (espRc == ESP_OK)
 	{
 		iError = SUCCESS;
