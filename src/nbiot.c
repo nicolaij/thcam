@@ -412,6 +412,9 @@ void modem_task(void *arg)
                 try_counter++;
                 ESP_LOGW(TAG, "CPIN:\n%s", data);
 
+                if ((xEventGroupGetBits(status_event_group) & END_WORK) || d_nbiot_error_counter-- == 0)
+                    break;
+
                 // Reset and Set Phone Functionality
                 if ((try_counter % 3) == 0) // if fail restart sim
                 {

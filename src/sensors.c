@@ -120,7 +120,7 @@ void i2c_task(void *arg)
     {
         th_sensor = dev_th_cfg.device_address;
         result.measure.d_thsensor_error = false;
-        xTaskNotify(xTaskGetCurrentTaskHandle(), (1 << BIT_NOTYFY_SENSOR_TH), eSetBits);
+        xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_TH, eSetBits);
     }
 
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_th_cfg, &th_handle));
@@ -138,7 +138,7 @@ void i2c_task(void *arg)
         }
         else
         {
-            xTaskNotify(xTaskGetCurrentTaskHandle(), (1 << BIT_NOTYFY_SENSOR_MAGACC), eSetBits);
+            xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_MAGACC, eSetBits);
             result.measure.d_mag_sensor_error = false;
         };
     } while (err_rc != ESP_OK && try > 0);
@@ -146,17 +146,19 @@ void i2c_task(void *arg)
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_m_cfg, &lsm303M_handle));
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_a_cfg, &lsm303A_handle));
 
+    TickType_t tm = 1000 / portTICK_PERIOD_MS;
+
     while (1)
     {
         uint32_t ulNotifiedValue;
 
         /* Ожидание оповещения. */
-        BaseType_t xResult = xTaskNotifyWait(pdFALSE,                                           /* Не очищать биты на входе. */
-                                             ULONG_MAX & ~(1 << BIT_NOTYFY_SENSOR_MAGACC_CONT), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
-                                             &ulNotifiedValue,                                  /* Сохраняет значение оповещения. */
-                                             1000 / portTICK_PERIOD_MS);
+        BaseType_t xResult = xTaskNotifyWait(pdFALSE,                                                                   /* Не очищать биты на входе. */
+                                             ULONG_MAX & ~(NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
+                                             &ulNotifiedValue,                                                          /* Сохраняет значение оповещения. */
+                                             tm);
 
-        if ((ulNotifiedValue & (1 << BIT_NOTYFY_SENSOR_TH)) && result.measure.d_thsensor_error == false)
+        if ((ulNotifiedValue & NOTYFY_SENSOR_TH) && result.measure.d_thsensor_error == false)
         {
             if (th_sensor == 0x40) // HTU21
             {
@@ -247,50 +249,68 @@ void i2c_task(void *arg)
             }
         };
 
-        if ((ulNotifiedValue & (1 << BIT_NOTYFY_SENSOR_MAGACC)) && result.measure.d_mag_sensor_error == false)
+        if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_STOP)
         {
-            LSM303DLHC_initialize();
-            LSM303DLHC_setAccelFullScale(4); // 4G
-
-            // set accel data rate to 1Hz
-            LSM303DLHC_setAccelOutputDataRate(1);
-            LSM303DLHC_setMagOutputDataRate(1);
-            LSM303DLHC_setMagGain(_lsm303Mag_Gauss_LSB_XY);
-            if (ulNotifiedValue & (1 << BIT_NOTYFY_SENSOR_MAGACC_CONT))
-            {
-                LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
-                nbiot_power_off();
-            }
-            else
-            {
-                LSM303DLHC_setMagMode(LSM303DLHC_MD_SINGLE);
-            }
-        };
-
-        if ((ulNotifiedValue & ((1 << BIT_NOTYFY_SENSOR_MAGACC) | (1 << BIT_NOTYFY_SENSOR_MAGACC_CONT))) && result.measure.d_mag_sensor_error == false)
+            xTaskNotify(xTaskGetCurrentTaskHandle(), 0, eSetValueWithOverwrite);
+        }
+        else
         {
-            esp_err_t ret;
-            int16_t ax, ay, az;
-            int16_t mx, my, mz;
-            ret = LSM303DLHC_getAcceleration(&ax, &ay, &az);
-            ret = LSM303DLHC_getMag(&mx, &my, &mz);
-            if (ret != ESP_OK)
+            if ((ulNotifiedValue & NOTYFY_SENSOR_MAGACC) && result.measure.d_mag_sensor_error == false)
             {
-                result.measure.d_mag_sensor_error = true;
-            }
-            //  Calculation by scale
-            result.measure.acc[0] = (float)(ax >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
-            result.measure.acc[1] = (float)(ay >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
-            result.measure.acc[2] = (float)(az >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
-            result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
-            result.measure.mag[1] = (float)my / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
-            result.measure.mag[2] = (float)mz / _lsm303Mag_Gauss_LSB_Z * SENSORS_GAUSS_TO_MICROTESLA;
-            ESP_LOGI("LSM303", "acc=%2.1f %2.1f %2.1f; mag=%3.1f %3.1f %3.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
+                tm = 1000 / portTICK_PERIOD_MS;
 
-            xEventGroupSetBits(status_event_group, END_MAG_SENSOR);
-        };
-    };
-};
+                LSM303DLHC_initialize();
+                LSM303DLHC_setAccelFullScale(4); // 4G
+
+                // set accel data rate to 1Hz
+                LSM303DLHC_setAccelOutputDataRate(1);
+                LSM303DLHC_setMagOutputDataRate(1);
+
+                LSM303DLHC_setMagGain(_lsm303Mag_Gauss_LSB_XY);
+                if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_CONT)
+                {
+                    LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
+                    nbiot_power_off();
+                }
+                else if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_SPEEDCONT)
+                {
+                    LSM303DLHC_setAccelOutputDataRate(10);
+                    LSM303DLHC_setMagOutputDataRate(10);
+                    LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
+                    nbiot_power_off();
+                    tm = 100 / portTICK_PERIOD_MS;
+                }
+                else
+                {
+                    LSM303DLHC_setMagMode(LSM303DLHC_MD_SINGLE);
+                }
+            }
+
+            if ((ulNotifiedValue & (NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT)) && result.measure.d_mag_sensor_error == false)
+            {
+                esp_err_t ret;
+                int16_t ax, ay, az;
+                int16_t mx, my, mz;
+                ret = LSM303DLHC_getAcceleration(&ax, &ay, &az);
+                ret = LSM303DLHC_getMag(&mx, &my, &mz);
+                if (ret != ESP_OK)
+                {
+                    result.measure.d_mag_sensor_error = true;
+                }
+                //  Calculation by scale
+                result.measure.acc[0] = (float)(ax >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
+                result.measure.acc[1] = (float)(ay >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
+                result.measure.acc[2] = (float)(az >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
+                result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
+                result.measure.mag[1] = (float)my / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
+                result.measure.mag[2] = (float)mz / _lsm303Mag_Gauss_LSB_Z * SENSORS_GAUSS_TO_MICROTESLA;
+                ESP_LOGI("LSM303", "acc=%2.1f %2.1f %2.1f; mag=%3.1f %3.1f %3.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
+
+                xEventGroupSetBits(status_event_group, END_MAG_SENSOR);
+            }
+        }
+    }
+}
 
 void dallas_task(void *arg)
 {

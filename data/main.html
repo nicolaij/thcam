@@ -11,12 +11,42 @@
       <input type="submit" value="Submit" />
     </form>
     <br />
-    <p><a href="/d3">Буфер данных</a></p>"
+    <div>
+      <input
+        type="checkbox"
+        id="accmag"
+        name="accmag"
+        onchange="toggleCheckbox(this)"
+      />
+      <label for="accmag">Read </label><b>ACC:</b>
+      <div id="accvalue" style="display: inline"></div>
+      <b>MAG:</b>
+      <div id="magvalue" style="display: inline"></div>
+    </div>
+    <p><a href="/d3">Буфер данных</a></p>
+
     <div id="filecontent"></div>
 
     <script>
+      var socket = new WebSocket("ws://" + location.host + "/ws");
+
+      socket.onopen = function () {
+        socket.send("id=");
+      };
+
+      socket.onmessage = function (e) {
+        //console.log(e);
+        res = e.data.split(";");
+        acc = res[0].split(" ");
+        mag = res[1].split(" ");
+        document.getElementById("accvalue").innerHTML =
+          acc[0] + ",&nbsp" + acc[1] + ",&nbsp" + acc[2] + "&nbsp";
+        document.getElementById("magvalue").innerHTML =
+          mag[0] + ",&nbsp" + mag[1] + ",&nbsp" + mag[2] + "&nbsp";
+      };
+
       window.onload = function () {
-        console.log(document.readyState);
+        //console.log(document.readyState);
         var xhttp = new XMLHttpRequest();
         xhttp.onreadystatechange = function () {
           if (this.readyState == 4 && this.status == 200) {
@@ -45,6 +75,14 @@
         xhttp2.open("GET", "/data.csv", true);
         xhttp2.send();
       };
+
+      function toggleCheckbox(element) {
+        if (element.checked == true) {
+          socket.send("id=" + element.name);
+        } else {
+          socket.send("id=");
+        }
+      }
 
       function validate() {
         document.getElementById("ip").value = string2num(

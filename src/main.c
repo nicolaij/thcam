@@ -117,7 +117,7 @@ void app_main(void)
     xTaskNotifyGive(xTaskDallas);
 
     xTaskCreate(i2c_task, "i2c_task", 1024 * 6, NULL, configMAX_PRIORITIES - 10, &xTaskI2C);
-    xTaskNotify(xTaskI2C, (1 << BIT_NOTYFY_SENSOR_TH) | (1 << BIT_NOTYFY_SENSOR_MAGACC), eSetBits);
+    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_MAGACC, eSetBits);
 
     // Light, Water
     dio_init();
@@ -218,7 +218,7 @@ void app_main(void)
                 wait * 60000 / portTICK_PERIOD_MS);
 
         } while (((uxBits & (nowake)) != 0));
-    };
+    }
 
     old_result = result;
 
@@ -275,6 +275,8 @@ void app_main(void)
         if (sleeptime > 15)
             sleeptime = 15;
     };
+
+    ESP_LOGI("result", OUT_JSON, get_menu_id("id"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
 
     // если зарядка - сон 1 мин.
     if (xEventGroupGetBits(status_event_group) & NOW_CHARGE || get_charge() == 1)

@@ -222,6 +222,7 @@ void console_task(void *arg)
             if (data[rxBytes - 1] == '\n')
             {
                 xEventGroupSetBits(status_event_group, SERIAL_TERMINAL_ACTIVE);
+                xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC_STOP, eSetBits);
 
                 if (data[rxBytes - 2] == '\r')
                 {
@@ -301,17 +302,23 @@ void console_task(void *arg)
                     {
                         NB_terminal_mode = 1;
                         xEventGroupSetBits(status_event_group, NB_TERMINAL);
-                        xTaskNotifyGive(xHandleNB); //если уже уснули
+                        xTaskNotifyGive(xHandleNB); // если уже уснули
                         // vTaskSuspend(xHandleNB); // Suspend NBIot task
                         wait_max_counter = 3;
                         enter_value = 0;
                     }
                     else if (n == sizeof(menu) / sizeof(menu_t) + 3) // Непрерывный опрос MAG/ACC
                     {
-                        xTaskNotify(xTaskI2C, (1 << BIT_NOTYFY_SENSOR_MAGACC) | (1 << BIT_NOTYFY_SENSOR_MAGACC_CONT), eSetBits);
+                        xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_CONT, eSetBits);
                         xEventGroupSetBits(status_event_group, NB_TERMINAL);
                         nbiot_power_off();
                         wait_max_counter = 3;
+                        enter_value = 0;
+                    }
+                    else if (n == sizeof(menu) / sizeof(menu_t) + 4) // WiFi
+                    {
+                        xTaskNotifyGive(xHandleWifi); // включаем WiFi
+
                         enter_value = 0;
                     }
                     else
@@ -333,6 +340,7 @@ void console_task(void *arg)
                         ESP_LOGI("menu", "%2i. История: %i", ++i, bootCount);
                         ESP_LOGI("menu", "%2i. AT терминал NBIoT", ++i);
                         ESP_LOGI("menu", "%2i. Непреравный опрос Mag/Acc", ++i);
+                        ESP_LOGI("menu", "%2i. WiFi On", ++i);
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = 0;
                     }

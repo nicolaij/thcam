@@ -37,11 +37,13 @@
 
 #define ONEWIRE_MAX_DS18B20 1
 
-#define BIT_NOTYFY_SENSOR_TH 0
-#define BIT_NOTYFY_SENSOR_MAG 1
-#define BIT_NOTYFY_SENSOR_ACC 2
-#define BIT_NOTYFY_SENSOR_MAGACC 3
-#define BIT_NOTYFY_SENSOR_MAGACC_CONT 4
+#define NOTYFY_SENSOR_TH BIT0
+#define NOTYFY_SENSOR_MAG BIT1
+#define NOTYFY_SENSOR_ACC BIT2
+#define NOTYFY_SENSOR_MAGACC BIT3
+#define NOTYFY_SENSOR_MAGACC_CONT BIT4
+#define NOTYFY_SENSOR_MAGACC_SPEEDCONT BIT5
+#define NOTYFY_SENSOR_MAGACC_STOP BIT6
 
 extern EventGroupHandle_t status_event_group;
 
@@ -157,10 +159,10 @@ typedef struct
 extern result_data_t result;
 extern result_data_t old_result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.0f,\"Water\":%.0f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Pressure\":%.3f,\"Acc\":[%.1f,%.1f,%.1f],\"Mag\":[%.1f,%.1f,%.1f],\"Flags\":\"0x%04X\"}"
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Pressure\":%.3f,\"Acc\":[%.1f,%.1f,%.1f],\"Mag\":[%.1f,%.1f,%.1f],\"Flags\":\"0x%04X\"}"
 #define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.pressure, prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2], prefix.discrete
 #define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, WaterTemp, Temp, Humidity, Pressure, AccX, AccY, AccZ, MagX, MagY, MagZ, Flags"
-#define OUT_MEASURE_FORMATS "%2.0f, %.3f, %4.0f, %4.0f, %2.1f, %2.1f, %2.1f, %3.3f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f, 0x%04X"
+#define OUT_MEASURE_FORMATS "%2.0f, %.3f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, %3.3f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f, 0x%04X"
 
 #define HISTORY_SIZE 100
 extern measure_data_t history[HISTORY_SIZE];

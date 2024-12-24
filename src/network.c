@@ -569,6 +569,127 @@ esp_err_t update_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/*
+ * Structure holding server handle
+ * and internal socket fd in order
+ * to use out of request send
+ */
+struct t_async_resp_arg
+{
+    httpd_handle_t hd;
+    int fd;
+    char *data;
+} async_resp_arg;
+
+/*
+ */
+static esp_err_t ws_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET)
+    {
+        ESP_LOGI(TAGH, "Handshake done, the new connection was opened");
+        return ESP_OK;
+    }
+    httpd_ws_frame_t ws_pkt;
+    uint8_t *buf = NULL;
+    memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
+    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+    /* Set max_len = 0 to get the frame len */
+    esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAGH, "httpd_ws_recv_frame failed to get frame len with %d", ret);
+        return ret;
+    }
+    ESP_LOGI(TAGH, "frame len is %d", ws_pkt.len);
+    if (ws_pkt.len)
+    {
+        /* ws_pkt.len + 1 is for NULL termination as we are expecting a string */
+        buf = calloc(1, ws_pkt.len + 1);
+        if (buf == NULL)
+        {
+            ESP_LOGE(TAGH, "Failed to calloc memory for buf");
+            return ESP_ERR_NO_MEM;
+        }
+        ws_pkt.payload = buf;
+        /* Set max_len = ws_pkt.len to get the frame payload */
+        ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAGH, "httpd_ws_recv_frame failed with %d", ret);
+            free(buf);
+            return ret;
+        }
+        ESP_LOGI(TAGH, "Got packet with message: %s", ws_pkt.payload);
+    }
+
+    ESP_LOGI(TAGH, "Packet type: %d", ws_pkt.type);
+    if ((ws_pkt.type == HTTPD_WS_TYPE_TEXT) && (strncmp((const char *)ws_pkt.payload, "id=", 3) == 0))
+    {
+        if (strncmp((const char *)(&ws_pkt.payload[3]), "accmag", 6) == 0)
+        {
+            xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_SPEEDCONT, eSetBits);
+            // return trigger_async_send(req->handle, req);
+            async_resp_arg.fd = httpd_req_to_sockfd(req);
+            async_resp_arg.hd = req->handle;
+
+            //ESP_LOGI(TAGH, "fd: %d", async_resp_arg.fd);
+        }
+        else
+        {
+            xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC_STOP, eSetBits);
+            async_resp_arg.fd = 0;
+        }
+    }
+
+    free(buf);
+    return ret;
+}
+
+/*
+esp_err_t sensor_get_handler(httpd_req_t *req)
+{
+
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+
+    if (buf_len < 15)
+    {
+        if (httpd_req_get_url_query_str(req, paramstring, buf_len) == ESP_OK)
+        {
+            if (httpd_query_key_value(paramstring, "id", param, sizeof(param)) == ESP_OK)
+            {
+                ESP_LOGI("http", "Found URL query parameter => id=%s", param);
+            };
+        };
+    };
+
+    if (strncmp("accmag", param) == 0)
+    {
+        xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_SPEEDCONT, eSetBits);
+
+        EventBits_t uxBits = xEventGroupWaitBits(
+            status_event_group, // The event group being tested.
+            END_MAG_SENSOR,     // The bits within the event group to wait for.
+            pdTRUE,             // BIT_0 & BIT_1 should be cleared before returning.
+            pdFALSE,            // ОБА
+            1000 / portTICK_PERIOD_MS);
+
+        sprintf(buf, "%.1f, %.1f, %.1f, %.1f, %.1f, %.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
+        httpd_resp_sendstr(req, buf);
+    }
+    else
+    {
+        // Set status
+        httpd_resp_set_status(req, "302 Temporary Redirect");
+        // Redirect to the "/" root directory
+        httpd_resp_set_hdr(req, "Location", "/");
+        // iOS requires content in the response to detect a captive portal, simply redirecting is not sufficient.
+        httpd_resp_send(req, "Redirect to root", HTTPD_RESP_USE_STRLEN);
+    }
+
+    return ESP_OK;
+}
+*/
 static const httpd_uri_t main_page = {
     .uri = "/",
     .method = HTTP_GET,
@@ -590,26 +711,24 @@ static const httpd_uri_t data_page = {
     .user_ctx = &((down_data_t){.filepath = "/spiffs/" DATAFILE, .content = "text/csv"}),
 };
 
+/*
 static const httpd_uri_t olddata_page = {
     .uri = "/old" DATAFILE,
     .method = HTTP_GET,
     .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/old" DATAFILE, .content = "text/csv"}),
-};
-
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/old" DATAFILE, .content = "text/csv"})};
+*/
 static const httpd_uri_t menu_post = {
     .uri = "/",
     .method = HTTP_POST,
     .handler = menu_post_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/main.html", .content = "text/html"}),
-};
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/main.html", .content = "text/html"})};
 
 httpd_uri_t update_get = {
     .uri = "/update",
     .method = HTTP_GET,
     .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/update.html", .content = "text/html"}),
-};
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/update.html", .content = "text/html"})};
 
 httpd_uri_t update_post = {
     .uri = "/update",
@@ -627,8 +746,7 @@ httpd_uri_t d3 = {
     .uri = "/d3",
     .method = HTTP_GET,
     .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/D3.html", .content = "text/html"}),
-};
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/D3.html", .content = "text/html"})};
 
 static const httpd_uri_t d3_get_gz = {
     .uri = "/d3.min.js",
@@ -636,6 +754,13 @@ static const httpd_uri_t d3_get_gz = {
     .handler = download_get_handler,
     .user_ctx = &((down_data_t){.filepath = "/spiffs/d3.min.js.gz", .content = "application/javascript"}),
 };
+
+static const httpd_uri_t ws = {
+    .uri = "/ws",
+    .method = HTTP_GET,
+    .handler = ws_handler,
+    .user_ctx = NULL,
+    .is_websocket = true};
 
 static httpd_handle_t start_webserver(void)
 {
@@ -664,11 +789,13 @@ static httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &update_get);
 
         httpd_register_uri_handler(server, &data_page);
-        httpd_register_uri_handler(server, &olddata_page);
+        // httpd_register_uri_handler(server, &olddata_page);
 
         httpd_register_uri_handler(server, &data_csv);
         httpd_register_uri_handler(server, &d3);
         httpd_register_uri_handler(server, &d3_get_gz);
+
+        httpd_register_uri_handler(server, &ws);
 
         return server;
     }
@@ -717,7 +844,29 @@ void wifi_task(void *arg)
         //    xEventGroupSetBits(status_event_group, WIFI_STOP);
         //}
 
-        if (xEventGroupGetBits(status_event_group) & END_WORK)
+        EventBits_t uxBits = xEventGroupWaitBits(
+            status_event_group, //* The event group being tested.
+            END_MAG_SENSOR,     //* The bits within the event group to wait for.
+            pdTRUE,             //* BIT_0 & BIT_1 should be cleared before returning.
+            pdFALSE,            //* ОБА
+            100 / portTICK_PERIOD_MS);
+
+        if ((uxBits & END_MAG_SENSOR) && async_resp_arg.fd > 0)
+        {
+            httpd_ws_frame_t ws_pkt;
+            char accbuf[48];
+            ws_pkt.len = sprintf(accbuf, "%3.1f %3.1f %3.1f;%3.1f %3.1f %3.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
+            ws_pkt.payload = (uint8_t *)accbuf;
+            ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+
+            esp_err_t ret = httpd_ws_send_frame_async(async_resp_arg.hd, async_resp_arg.fd, &ws_pkt);
+            if (ret != ESP_OK)
+            {
+                async_resp_arg.fd = 0;
+            };
+        }
+
+        if (uxBits & END_WORK)
         {
             esp_wifi_stop();
             xEventGroupSetBits(status_event_group, END_WIFI);
@@ -730,6 +879,6 @@ void wifi_task(void *arg)
             esp_restart();
         }
 
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        // vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }

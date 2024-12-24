@@ -566,9 +566,12 @@ void cont_measure1(bool printdata)
         if (printdata)
             printf("\n");
 
-        result.measure.water = water_max / water_max_cnt;
+        int w2_max = 0;
+        float w2 = 0;
+        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, 4095, &w2_max));
+        w2 = (water_max / water_max_cnt) * 100.0 / w2_max;
         // result.measure.water2_last = get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water2", "ADC chan %d: max: %d мВ - %d Ом", PIN_WATER2, (int)result.measure.water, get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
+        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
 
         vTaskDelay(1);
 
@@ -603,9 +606,14 @@ void cont_measure1(bool printdata)
         if (printdata)
             printf("\n");
 
+        int w1_max = 0;
+        float w1 = 0;
+        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, 4095, &w1_max));
+        w1 = (water_max / water_max_cnt) * 100.0 / w1_max;
+
         // result.measure.water1_last = get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water2", "ADC chan %d: max: %d мВ - %d Ом", PIN_WATER1, water_max / water_max_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
-        result.measure.water = ((int)result.measure.water + water_max / water_max_cnt) / 2;
+        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
+        result.measure.water = (w1 + w2) / 2.0;
 
         /*
                 for (int i = 0; i < points * 2; i++)
@@ -679,8 +687,13 @@ void dio_init()
     oneshot_adc_init();
 
     int l = 0;
+    int l_max = 0;
     ESP_ERROR_CHECK(adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &l));
-    ESP_LOGI(TAG, "Light: %d mV", l);
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(l_cal_handle, 4095, &l_max));
+
+    result.measure.light = l * 100.0 / l_max;
+
+    ESP_LOGI(TAG, "Light: %.1f%% (%d mV)", result.measure.light, l);
 
     /*
         ESP_ERROR_CHECK(gpio_pulldown_dis(PIN_WATER1));
@@ -719,10 +732,11 @@ void dio_init()
             // нет смысла держать подтяжку. Экономим энергию
             gpio_pulldown_dis(PIN_WATER3);
             water2_mode = '0';
-            result.measure.d_wet_mode = 2;
+            result.measure.d_wet_mode = 0;
         }
     }
     // Light с подтяжкой
+    /*
     if (gpio_get_level(PIN_LIGHT) == 1)
     {
         gpio_pulldown_en(PIN_LIGHT);
@@ -733,7 +747,7 @@ void dio_init()
             gpio_pulldown_dis(PIN_LIGHT);
         }
     }
-
+    */
     vTaskDelay(1);
 
     ESP_LOGI(TAG, "Light: %d; Water: %d (%c%c); Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER3), water1_mode, water2_mode, gpio_get_level(PIN_BATT));
@@ -840,7 +854,7 @@ void btn_task(void *arg)
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     // configure GPIO with the given settings
     ESP_ERROR_CHECK(gpio_config(&io_conf));
-    
+
     vTaskDelay(pdMS_TO_TICKS(20));
 
     int debounce = 0;
@@ -851,7 +865,7 @@ void btn_task(void *arg)
     const int short_count = 4;
     const int long_count = 50;
 
-    //vTaskDelay(pdMS_TO_TICKS(500));
+    // vTaskDelay(pdMS_TO_TICKS(500));
 
     while (true)
     {
@@ -874,7 +888,7 @@ void btn_task(void *arg)
                 ESP_LOGI("IO", "Button long press! %d", output + 1);
                 debounce = 0;
 
-                //gpio_config_t io_conf = {};
+                // gpio_config_t io_conf = {};
                 /*
                                 if (++output > output_count)
                                 {
@@ -938,7 +952,7 @@ void btn_task(void *arg)
                 debounce = 0;
 
                 xTaskNotifyGive(xTaskDallas);
-                xTaskNotify(xTaskI2C, (1 << BIT_NOTYFY_SENSOR_TH) | (1 << BIT_NOTYFY_SENSOR_MAGACC), eSetBits);
+                xTaskNotify(xTaskI2C, (NOTYFY_SENSOR_TH) | (NOTYFY_SENSOR_MAGACC), eSetBits);
                 cont_measure1(false);
 
                 xTaskNotifyGive(xHandleWifi); // включаем WiFi;
