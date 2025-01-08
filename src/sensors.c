@@ -170,7 +170,7 @@ void i2c_task(void *arg)
 
                 cmd = 0xe3; // Trigger Temperature Measurement
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(th_handle, &cmd, 1, 10));
-                vTaskDelay(50 / portTICK_PERIOD_MS);
+                vTaskDelay(50 / portTICK_PERIOD_MS); //14 bit 44-50 ms
                 err_rc = i2c_master_receive(th_handle, buffer, 3, 10);
 
                 if (err_rc == ESP_OK)
@@ -183,8 +183,8 @@ void i2c_task(void *arg)
 
                 cmd = 0xe5; // Trigger Humidity Measurement
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(th_handle, &cmd, 1, 10));
-                vTaskDelay(50 / portTICK_PERIOD_MS);
-                err_rc = i2c_master_receive(th_handle, buffer, 3, 100);
+                vTaskDelay(20 / portTICK_PERIOD_MS); //12 bits 14-16 ms
+                err_rc = i2c_master_receive(th_handle, buffer, 3, 10);
                 if (err_rc == ESP_OK)
                 {
                     if ((buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)

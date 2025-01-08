@@ -569,7 +569,7 @@ void cont_measure1(bool printdata)
         int w2_max = 0;
         float w2 = 0;
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, 4095, &w2_max));
-        w2 = (water_max / water_max_cnt) * 100.0 / w2_max;
+        w2 = (w2_max - (water_max / water_max_cnt)) * 100.0 / w2_max;
         // result.measure.water2_last = get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
         ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
 
@@ -609,7 +609,7 @@ void cont_measure1(bool printdata)
         int w1_max = 0;
         float w1 = 0;
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, 4095, &w1_max));
-        w1 = (water_max / water_max_cnt) * 100.0 / w1_max;
+        w1 = (w1_max - (water_max / water_max_cnt)) * 100.0 / w1_max;
 
         // result.measure.water1_last = get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
         ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
