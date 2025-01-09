@@ -49,9 +49,9 @@ char water1_mode = 'R';
 char water2_mode = '0';
 
 #define CHAN 2
-#define FREQ 1000
-#define TIME 1000
-#define BLOCKSIZE (50 * 4 * CHAN)
+#define FREQ 1000 // Hz
+#define TIME 1000 // total measure time (ms)
+#define BLOCKSIZE (50 * SOC_ADC_DIGI_RESULT_BYTES * CHAN)
 #define points (TIME * FREQ / 1000 * CHAN)
 
 uint8_t adcresult[points * sizeof(int)] = {0};
@@ -467,12 +467,9 @@ void cont_measure1(bool printdata)
 {
 
     uint32_t ret_num = 0;
-    uint32_t light = 0;
-    uint32_t light_cnt = 0;
     esp_err_t ret = 0;
     uint8_t *buf = adcresult;
     int len = 0;
-    uint8_t *switch_pos = 0;
 
     int water_max = 0;
     int water_max_cnt = 0;
@@ -502,43 +499,25 @@ void cont_measure1(bool printdata)
         }
 
         ret = adc_continuous_read(cont_handle, buf, sizeof(adcresult), &ret_num, ADC_MAX_DELAY);
-        // printf("adc ret: %lu\n", ret_num);
+        if (ret != ESP_OK)
+            break;
+
         len = len + ret_num;
         buf += ret_num;
     }
 
-    /*
-
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_INPUT)); // 10k
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT));
-        ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 0));
-
-        gpio_pulldown_dis(PIN_WATER1);
-        gpio_pullup_dis(PIN_WATER1);
-        gpio_pulldown_dis(PIN_WATER2);
-        gpio_pullup_dis(PIN_WATER2);
-
-        while (len < sizeof(adcresult))
-        {
-            ret = adc_continuous_read(cont_handle, buf, sizeof(adcresult), &ret_num, ADC_MAX_DELAY);
-            // printf("adc ret: %lu\n", ret_num);
-            len = len + ret_num;
-            buf += ret_num;
-        }
-    */
     ESP_ERROR_CHECK(adc_continuous_stop(cont_handle));
 
     ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_INPUT)); // 10k
     ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_INPUT)); // 10k
 
-    int v_power = 3300;
-    if (ret == ESP_OK)
+    if (len > 0)
     {
         ESP_LOGI(TAG, "latest ret is %x, ret_num is %" PRIu32 " bytes", ret, ret_num);
 
-        dir = 0;
         water_max = 0;
         water_max_cnt = 0;
+        int cnt = 0; //счетчик пар (1000 всего)
         for (int i = 0; i < len; i += SOC_ADC_DIGI_RESULT_BYTES)
         {
             adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
@@ -550,12 +529,15 @@ void cont_measure1(bool printdata)
             if (chan_num == PIN_WATER2)
             {
                 ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, data, &v));
+
                 if (printdata)
                     printf("%d ", v);
 
-                if ((i / (SOC_ADC_DIGI_RESULT_BYTES * 2)) % 50 == 49)
+                cnt++;
+
+                if (cnt % 100 == 49) // берем последние данные перед реверсом измерения
                 {
-                    if (dir++ % 2 == 0 && dir >= 10)
+                    if (cnt > (points / CHAN) / 2) // берем данные только со второй половины измерений
                     {
                         water_max += v;
                         water_max_cnt++;
@@ -571,11 +553,11 @@ void cont_measure1(bool printdata)
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, 4095, &w2_max));
         w2 = (w2_max - (water_max / water_max_cnt)) * 100.0 / w2_max;
         // result.measure.water2_last = get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
+        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, get_menu_id("r1.2") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
 
         vTaskDelay(1);
 
-        dir = 0;
+        cnt = 0;
         water_max = 0;
         water_max_cnt = 0;
         for (int i = 0; i < len; i += SOC_ADC_DIGI_RESULT_BYTES)
@@ -593,9 +575,11 @@ void cont_measure1(bool printdata)
                 if (printdata)
                     printf("%d ", v);
 
-                if ((i / (SOC_ADC_DIGI_RESULT_BYTES * 2)) % 50 == 49)
+                cnt++;
+
+                if (cnt % 100 == 99) // берем последние данные перед реверсом измерения
                 {
-                    if (dir++ % 2 == 1 && dir >= 10)
+                    if (cnt > (points / CHAN) / 2) // берем данные только со второй половины измерений
                     {
                         water_max += v;
                         water_max_cnt++;
@@ -612,47 +596,8 @@ void cont_measure1(bool printdata)
         w1 = (w1_max - (water_max / water_max_cnt)) * 100.0 / w1_max;
 
         // result.measure.water1_last = get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt));
+        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
         result.measure.water = (w1 + w2) / 2.0;
-
-        /*
-                for (int i = 0; i < points * 2; i++)
-                {
-                    adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult32_1[i];
-                    uint32_t chan_num = p->type2.channel;
-                    uint32_t data = p->type2.data;
-
-                    int v = 0;
-                    int v_power = 3300;
-                    int r_ch1 = 10000;
-                    int r_ch2 = 100000;
-
-                    if (chan_num == PIN_WATER2)
-                    {
-                        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, data, &v));
-
-                        printf("%d ", r_ch1 * v / (v_power - v));
-
-                        water += v;
-                        water_cnt++;
-                    }
-                }
-                printf("\n");
-
-                ESP_LOGI("Water2", "ADC chan %d: %ld мВ - %.0f кОм", PIN_WATER2, water / water_cnt, result.measure.water);
-        */
-        /*
-                for (int i = 0; i < points; i++)
-                {
-                    printf("%d ", adcresult[0][i]);
-                }
-                printf("\n");
-                for (int i = 0; i < points; i++)
-                {
-                    //printf("%d ", adcresult[1][i]);
-                }
-                printf("\n");
-        */
     }
 }
 
@@ -695,16 +640,6 @@ void dio_init()
 
     ESP_LOGI(TAG, "Light: %.1f%% (%d mV)", result.measure.light, l);
 
-    /*
-        ESP_ERROR_CHECK(gpio_pulldown_dis(PIN_WATER1));
-        ESP_ERROR_CHECK(gpio_pullup_dis(PIN_WATER1));
-        ESP_ERROR_CHECK(gpio_pulldown_dis(PIN_WATER2));
-        ESP_ERROR_CHECK(gpio_pullup_dis(PIN_WATER2));
-    */
-    // measure1();
-
-    // measure1();
-
     // Water1, Water2 - питание через резистор 10к
     water1_mode = 'R';
 
@@ -735,19 +670,7 @@ void dio_init()
             result.measure.d_wet_mode = 0;
         }
     }
-    // Light с подтяжкой
-    /*
-    if (gpio_get_level(PIN_LIGHT) == 1)
-    {
-        gpio_pulldown_en(PIN_LIGHT);
-        vTaskDelay(1);
-        if (gpio_get_level(PIN_LIGHT) == 1)
-        {
-            // нет смысла держать подтяжку. Экономим энергию
-            gpio_pulldown_dis(PIN_LIGHT);
-        }
-    }
-    */
+
     vTaskDelay(1);
 
     ESP_LOGI(TAG, "Light: %d; Water: %d (%c%c); Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER3), water1_mode, water2_mode, gpio_get_level(PIN_BATT));
