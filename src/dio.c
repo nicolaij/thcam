@@ -473,6 +473,8 @@ void cont_measure1(bool printdata)
 
     int water_max = 0;
     int water_max_cnt = 0;
+    int water_corr = 0;
+    int water_corr_cnt = 0;
 
     int dir = 0;
 
@@ -517,7 +519,9 @@ void cont_measure1(bool printdata)
 
         water_max = 0;
         water_max_cnt = 0;
-        int cnt = 0; //счетчик пар (1000 всего)
+        water_corr = 0;
+        water_corr_cnt = 0;
+        int cnt = 0; // счетчик пар (1000 всего)
         for (int i = 0; i < len; i += SOC_ADC_DIGI_RESULT_BYTES)
         {
             adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
@@ -541,6 +545,17 @@ void cont_measure1(bool printdata)
                     {
                         water_max += v;
                         water_max_cnt++;
+
+                        // Коррекция на сопротивление открытого нижнего ключа
+                        p--; // 1-ый канал
+                        chan_num = p->type2.channel;
+                        v = 0;
+                        if (chan_num == PIN_WATER1)
+                        {
+                            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, p->type2.data, &v));
+                            water_corr += v;
+                            water_corr_cnt++;
+                        }
                     }
                 }
             }
@@ -551,13 +566,15 @@ void cont_measure1(bool printdata)
         int w2_max = 0;
         float w2 = 0;
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, 4095, &w2_max));
-        w2 = (w2_max - (water_max / water_max_cnt)) * 100.0 / w2_max;
+        w2 = (w2_max - water_max / water_max_cnt) * 100.0 / (w2_max - water_corr / water_corr_cnt);
         // result.measure.water2_last = get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, get_menu_id("r1.2") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
+        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, = %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.2") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
 
         vTaskDelay(1);
 
         cnt = 0;
+        water_corr = 0;
+        water_corr_cnt = 0;
         water_max = 0;
         water_max_cnt = 0;
         for (int i = 0; i < len; i += SOC_ADC_DIGI_RESULT_BYTES)
@@ -583,6 +600,18 @@ void cont_measure1(bool printdata)
                     {
                         water_max += v;
                         water_max_cnt++;
+                        
+                        // Коррекция на сопротивление открытого нижнего ключа
+                        p++; // 2-ой канал
+                        chan_num = p->type2.channel;
+                        v = 0;
+                        if (chan_num == PIN_WATER2)
+                        {
+                            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, p->type2.data, &v));
+                            water_corr += v;
+                            water_corr_cnt++;
+                        }
+
                     }
                 }
             }
@@ -593,10 +622,9 @@ void cont_measure1(bool printdata)
         int w1_max = 0;
         float w1 = 0;
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, 4095, &w1_max));
-        w1 = (w1_max - (water_max / water_max_cnt)) * 100.0 / w1_max;
-
+        w1 = (w1_max - (water_max / water_max_cnt)) * 100.0 / (w1_max - (water_corr / water_corr_cnt));
         // result.measure.water1_last = get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ) - %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
+        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, = %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
         result.measure.water = (w1 + w2) / 2.0;
     }
 }
