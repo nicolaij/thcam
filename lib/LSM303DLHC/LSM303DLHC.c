@@ -37,6 +37,8 @@ uint8_t devAddrM = LSM303DLHC_DEFAULT_ADDRESS_M;
 uint8_t buffer[6];
 bool endianMode = LSM303DLHC_LITTLE_ENDIAN;
 
+#define CONFIG_I2C_TIMEOUT 50
+
 #if 0
 /** Default constructor, uses default I2C address.
  * @see LSM303DLHC_DEFAULT_ADDRESS_A
@@ -55,24 +57,29 @@ esp_err_t writeByte(uint8_t devAddr, uint8_t regAddr, uint8_t val)
   txbuffer[0] = regAddr;
   txbuffer[1] = val;
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_A)
-    return i2c_master_transmit(lsm303A_handle, txbuffer, 2, 10);
+    return i2c_master_transmit(lsm303A_handle, txbuffer, 2, CONFIG_I2C_TIMEOUT);
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_M)
-    return i2c_master_transmit(lsm303M_handle, txbuffer, 2, 10);
+    return i2c_master_transmit(lsm303M_handle, txbuffer, 2, CONFIG_I2C_TIMEOUT);
   return ESP_ERR_NOT_FOUND;
 }
 
 esp_err_t readByte(uint8_t devAddr, uint8_t regAddr, uint8_t *result)
 {
+  esp_err_t err = ESP_FAIL;
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_A)
-    i2c_master_transmit(lsm303A_handle, &regAddr, 1, 10);
+    err = i2c_master_transmit(lsm303A_handle, &regAddr, 1, CONFIG_I2C_TIMEOUT);
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_M)
-    i2c_master_transmit(lsm303M_handle, &regAddr, 1, 10);
+    err = i2c_master_transmit(lsm303M_handle, &regAddr, 1, CONFIG_I2C_TIMEOUT);
+
+  if (err != ESP_OK)
+    return err;
 
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_A)
-    return i2c_master_receive(lsm303A_handle, result, 1, 10);
+    err = i2c_master_receive(lsm303A_handle, result, 1, CONFIG_I2C_TIMEOUT);
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_M)
-    return i2c_master_receive(lsm303M_handle, result, 1, 10);
-  return ESP_ERR_NOT_FOUND;
+    err = i2c_master_receive(lsm303M_handle, result, 1, CONFIG_I2C_TIMEOUT);
+
+  return err;
 }
 
 /** Read multiple bytes from an 8-bit device register.
@@ -85,16 +92,23 @@ esp_err_t readByte(uint8_t devAddr, uint8_t regAddr, uint8_t *result)
  */
 esp_err_t readBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t *data)
 {
+  esp_err_t err = ESP_FAIL;
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_A)
-    i2c_master_transmit(lsm303A_handle, &regAddr, 1, 10);
+    err = i2c_master_transmit(lsm303A_handle, &regAddr, 1, CONFIG_I2C_TIMEOUT);
+
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_M)
-    i2c_master_transmit(lsm303M_handle, &regAddr, 1, 10);
+    err = i2c_master_transmit(lsm303M_handle, &regAddr, 1, CONFIG_I2C_TIMEOUT);
+
+  if (err != ESP_OK)
+    return err;
 
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_A)
-    return i2c_master_receive(lsm303A_handle, data, length, 10);
+    err = i2c_master_receive(lsm303A_handle, data, length, CONFIG_I2C_TIMEOUT);
+
   if (devAddr == LSM303DLHC_DEFAULT_ADDRESS_M)
-    return i2c_master_receive(lsm303M_handle, data, length, 10);
-  return ESP_ERR_NOT_FOUND;
+    err = i2c_master_receive(lsm303M_handle, data, length, CONFIG_I2C_TIMEOUT);
+
+  return err;
 }
 
 /** Read a single bit from an 8-bit device register.
@@ -2464,8 +2478,7 @@ uint16_t LSM303DLHC_getMagGain()
 */
 void LSM303DLHC_setMagMode(uint8_t mode)
 {
-  writeBits(devAddrM, LSM303DLHC_RA_MR_REG_M, LSM303DLHC_MD_BIT, LSM303DLHC_MD_LENGTH,
-            mode);
+  writeBits(devAddrM, LSM303DLHC_RA_MR_REG_M, LSM303DLHC_MD_BIT, LSM303DLHC_MD_LENGTH, mode);
 }
 
 /*Get the magnetometer mode.

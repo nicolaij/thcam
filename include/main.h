@@ -9,7 +9,7 @@
 #define MODEM_POWER GPIO_NUM_10
 // пробуждение от зарядки
 #define PIN_BATT GPIO_NUM_0
-#define PIN_INT_MAG GPIO_NUM_5
+#define PIN_INT_ACC GPIO_NUM_5
 #define PIN_WATER3 GPIO_NUM_1
 #define PIN_LIGHT GPIO_NUM_4
 #define PIN_WATER1 GPIO_NUM_2
@@ -22,7 +22,7 @@
 #define TXD_PIN (GPIO_NUM_19)
 #define RXD_PIN (GPIO_NUM_18)
 
-#define END_WORK BIT1
+#define END_WORK_NBIOT BIT1
 #define END_WIFI BIT2
 #define END_RADIO BIT3
 #define NOW_CHARGE BIT4
@@ -33,7 +33,7 @@
 #define NB_TERMINAL BIT9
 #define END_DS_SENSOR BIT10
 #define END_TH_SENSOR BIT11
-#define END_MAG_SENSOR BIT12
+#define READ_MAG_SENSOR BIT12
 
 #define ONEWIRE_MAX_DS18B20 1
 
@@ -44,6 +44,9 @@
 #define NOTYFY_SENSOR_MAGACC_CONT BIT4
 #define NOTYFY_SENSOR_MAGACC_SPEEDCONT BIT5
 #define NOTYFY_SENSOR_MAGACC_STOP BIT6
+#define NOTYFY_SENSOR_SET_MAGACC_INT BIT7
+#define NOTYFY_SENSOR_MAGACC_GET_INT BIT8
+#define NOTYFY_SENSOR_SET_MAGACC BIT9
 
 extern EventGroupHandle_t status_event_group;
 
@@ -112,26 +115,26 @@ typedef struct
 {
     union
     {
-        uint16_t discrete;
+        uint16_t flags;
         struct
         {
-            bool d_light : 1;
-            bool d_water : 1;
-            bool d_wet_mode : 1;
-            bool d_charge : 1;
+            bool d_light : 1;   // пробуждение от датчика света
+            bool d_water : 1;   // пробуждение от повышения влажности
+            bool d_acc_int : 1; // пробуждение от прерывания ACC
+            bool d_charge : 1;  // пробуждение от зарядки
 
-            bool d_nbiot_send_succes : 1;
-            bool reserved6 : 1;
+            bool d_light_mode : 1; // режим высокой освещенности (включена нижняя подтяжка)
+            bool d_wet_mode : 1;   // режим высокой влажности (включена нижняя подтяжка)
             bool reserved7 : 1;
-            bool reserved8 : 1;
-            
-            bool d_thsensor_error : 1;
-            bool d_dallas_sensor_error : 1;
-            bool d_mag_sensor_error : 1;
-            bool d_nbiot_error : 1;
-            
-            bool reserved13 : 1;
-            bool reserved14 : 1;
+            bool d_nbiot_send_succes : 1; // признак успешной передачи NBIoT
+
+            bool d_thsensor_error : 1;      // ошибка датчика
+            bool d_dallas_sensor_error : 1; // ошибка датчика
+            bool d_mag_sensor_error : 1;    // ошибка датчика
+            bool d_nbiot_error : 1;         // ошибка модуля NBIoT
+
+            bool open : 1;  // Дискретный сигнал открыто
+            bool close : 1; // Дискретный сигнал закрыто
             bool reserved15 : 1;
             bool reserved16 : 1;
         };
@@ -140,7 +143,6 @@ typedef struct
     float internal_temp;
     float temp;
     float humidity;
-    float pressure;
     float light;
     float water_temp;
     float water;
@@ -159,10 +161,10 @@ typedef struct
 extern result_data_t result;
 extern result_data_t old_result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Pressure\":%.3f,\"Acc\":[%.1f,%.1f,%.1f],\"Mag\":[%.1f,%.1f,%.1f],\"Flags\":\"0x%04X\"}"
-#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.pressure, prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2], prefix.discrete
-#define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, WaterTemp, Temp, Humidity, Pressure, AccX, AccY, AccZ, MagX, MagY, MagZ, Flags"
-#define OUT_MEASURE_FORMATS "%2.0f, %.3f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, %3.3f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f, 0x%04X"
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Acc\":[%.1f,%.1f,%.1f],\"Mag\":[%.1f,%.1f,%.1f],\"Flags\":\"0x%04X\"}"
+#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2], prefix.flags
+#define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, WaterTemp, Temp, Humidity, AccX, AccY, AccZ, MagX, MagY, MagZ, Flags"
+#define OUT_MEASURE_FORMATS "%2.0f, %.3f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f, 0x%04X"
 
 #define HISTORY_SIZE 100
 extern measure_data_t history[HISTORY_SIZE];

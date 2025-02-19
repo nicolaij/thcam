@@ -8,6 +8,8 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 
+#include "math.h"
+
 #include "freertos/queue.h"
 #include "driver/gptimer.h"
 
@@ -38,15 +40,6 @@ adc_cali_handle_t l_cal_handle;
 adc_continuous_handle_t cont_handle;
 
 adc_oneshot_unit_handle_t l_adc_handle;
-
-// R - внешний 10к
-// r - внешний 10к + внутр. нижн. 45к.
-// P - питание через верхний ключ
-char water1_mode = 'R';
-
-// r - внутр. нижн. 45к.
-// 0 - свободный
-char water2_mode = '0';
 
 #define CHAN 2
 #define FREQ 1000 // Hz
@@ -138,6 +131,10 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
     {
         xEventGroupSetBitsFromISR(status_event_group, NOW_CHARGE, &xHigherPriorityTaskWoken);
     }
+    else if (gpio_num == PIN_INT_ACC)
+    {
+        xTaskNotifyFromISR(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetBits, &xHigherPriorityTaskWoken);
+    }
 
     if (xHigherPriorityTaskWoken == pdTRUE)
     {
@@ -216,230 +213,6 @@ static void continuous_adc_init()
 }
 
 static portMUX_TYPE my_spinlock = portMUX_INITIALIZER_UNLOCKED;
-
-void measure1()
-{
-
-    oneshot_adc_init();
-
-    // переключаем каналы измерения попеременно
-    uint32_t pulse_time = 10;
-    int64_t start_time = esp_timer_get_time();
-    int64_t lt = start_time;
-
-    ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
-    ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT));
-    ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 0));
-    ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 1));
-    vTaskDelay(1);
-
-    for (int i = 0; i < points; i++)
-    {
-        // taskENTER_CRITICAL(&my_spinlock);
-
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_INPUT));
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT));
-        ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 0));
-        // ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 1));
-        ESP_ERROR_CHECK(adc_oneshot_read(l_adc_handle, PIN_WATER1, &adcresult32_1[i]));
-        // ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_WATER2, &raw_value));
-        // ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan1_handle, raw_value, &adcresult[1][i]));
-        // ESP_ERROR_CHECK(gpio_set_level(PIN_WATER, 0));
-        // ESP_LOGI(TAG, "Water2: %d", raw_value);
-        // vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-        /*
-                ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
-                ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT));
-                ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 0));
-                ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 1));
-                esp_rom_delay_us(pulse_time);
-                ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
-                ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT));
-                ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 1));
-                ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 0));
-                esp_rom_delay_us(pulse_time);
-
-
-                        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
-                        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT));
-                        ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 1));
-                        ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 0));
-                        esp_rom_delay_us(pulse_time);
-
-                        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
-                        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_INPUT));
-                        ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 0));
-                        // ESP_ERROR_CHECK(adc_oneshot_get_calibrated_result(adc1_handle, adc1_cali_chan0_handle, PIN_WATER1, &adcresult[0][i]));
-                        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PIN_WATER2, &adcresult[1][i]));
-                */
-        // taskEXIT_CRITICAL(&my_spinlock);
-
-        if (i == 0)
-        {
-            // pulse_time = (esp_timer_get_time() - start_time) / 2;
-
-            // < 50 mV (~ > 20mA )
-            if (adcresult32_1[i] < 50)
-            {
-                continue;
-            }
-        }
-        else
-        {
-            // < 50 mV (~ > 20mA )
-            if (adcresult32_1[i] < 50)
-            {
-                ESP_LOGW(TAG, "КЗ");
-                break;
-            }
-        }
-    }
-
-    ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 0));
-    ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 0));
-
-    ESP_LOGI(TAG, "Time: %lld, Pulse: %lu ", (esp_timer_get_time() - start_time), pulse_time);
-
-    int avg1 = 0;
-    int avg2 = 0;
-    for (int i = 0; i < points; i++)
-    {
-        // printf("%4d/%4d ", adcresult[0][i], adcresult[1][i]);
-        avg1 += adcresult32_1[i];
-        avg2 += adcresult32_2[i];
-    }
-    // printf("\n");
-
-    ESP_LOGI(TAG, "RAW AVG Water1: %d", avg1 / points);
-    ESP_LOGI(TAG, "RAW AVG Water2: %d", avg2 / points);
-
-    avg1 = 0;
-    avg2 = 0;
-    int adc_raw;
-    int v_power = 3300;
-    int v_adc = 0;
-    int r_ch1 = 10000;
-    int r_ch2 = 100000;
-    for (int i = 0; i < points; i++)
-    {
-        adc_raw = adcresult32_1[i];
-        // ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw, &v_adc));
-        adcresult32_1[i] = r_ch1 * v_adc / (v_power - v_adc);
-
-        adc_raw = adcresult32_2[i];
-        // ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan1_handle, adc_raw, &v_adc));
-        adcresult32_2[i] = r_ch2 * v_adc / (v_power - v_adc);
-
-        avg1 += adcresult32_1[i];
-        avg2 += adcresult32_2[i];
-    }
-
-    for (int i = 0; i < points; i++)
-    {
-        printf("%d ", adcresult32_1[i]);
-    }
-    printf("\n");
-    for (int i = 0; i < points; i++)
-    {
-        printf("%d ", adcresult32_2[i]);
-    }
-    printf("\n");
-
-    ESP_LOGI(TAG, "Volt AVG Water1: %d", avg1 / points);
-    ESP_LOGI(TAG, "Volt AVG Water2: %d", avg2 / points);
-};
-
-void measure2()
-{
-    int64_t start_time = esp_timer_get_time();
-    for (int i = 0; i < points; i++)
-    {
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_INPUT));
-        ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 1));
-
-        ESP_ERROR_CHECK(adc_oneshot_read(l_adc_handle, PIN_WATER2, &adcresult32_2[i]));
-    }
-
-    ESP_LOGI(TAG, "Time: %lld", (esp_timer_get_time() - start_time));
-
-    int avg1 = 0;
-    int avg2 = 0;
-    for (int i = 0; i < points; i++)
-    {
-        // printf("%4d/%4d ", adcresult[0][i], adcresult[1][i]);
-        avg1 += adcresult32_1[i];
-        avg2 += adcresult32_2[i];
-    }
-    // printf("\n");
-
-    ESP_LOGI(TAG, "RAW AVG Water1: %d", avg1 / points);
-    ESP_LOGI(TAG, "RAW AVG Water2: %d", avg2 / points);
-
-    avg1 = 0;
-    avg2 = 0;
-    int adc_raw;
-    for (int i = 0; i < points; i++)
-    {
-        adc_raw = adcresult32_1[i];
-        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(l_cal_handle, adc_raw, &adcresult32_1[i]));
-        adc_raw = adcresult32_2[i];
-        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(l_cal_handle, adc_raw, &adcresult32_2[i]));
-        printf("%4d/%4d ", adcresult32_1[i], adcresult32_2[i]);
-        avg1 += adcresult32_1[i];
-        avg2 += adcresult32_2[i];
-    }
-    printf("\n");
-
-    ESP_LOGI(TAG, "Volt AVG Water1: %d", avg1 / points);
-    ESP_LOGI(TAG, "Volt AVG Water2: %d", avg2 / points);
-};
-
-void measure3()
-{
-    int64_t start_time = esp_timer_get_time();
-    for (int i = 0; i < points; i++)
-    {
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_INPUT));
-        ESP_ERROR_CHECK(adc_oneshot_read(l_adc_handle, PIN_WATER1, &adcresult32_1[i]));
-        ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_INPUT));
-        ESP_ERROR_CHECK(adc_oneshot_read(l_adc_handle, PIN_WATER2, &adcresult32_2[i]));
-    }
-
-    ESP_LOGI(TAG, "Time: %lld", (esp_timer_get_time() - start_time));
-
-    int avg1 = 0;
-    int avg2 = 0;
-    for (int i = 0; i < points; i++)
-    {
-        // printf("%4d/%4d ", adcresult[0][i], adcresult[1][i]);
-        avg1 += adcresult32_1[i];
-        avg2 += adcresult32_2[i];
-    }
-    // printf("\n");
-
-    ESP_LOGI(TAG, "RAW AVG Water1: %d", avg1 / points);
-    ESP_LOGI(TAG, "RAW AVG Water2: %d", avg2 / points);
-
-    avg1 = 0;
-    avg2 = 0;
-    int adc_raw;
-    for (int i = 0; i < points; i++)
-    {
-        adc_raw = adcresult32_1[i];
-        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(l_cal_handle, adc_raw, &adcresult32_1[i]));
-        adc_raw = adcresult32_2[i];
-        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(l_cal_handle, adc_raw, &adcresult32_2[i]));
-        printf("%4d/%4d ", adcresult32_1[i], adcresult32_2[i]);
-        avg1 += adcresult32_1[i];
-        avg2 += adcresult32_2[i];
-    }
-    printf("\n");
-
-    ESP_LOGI(TAG, "Volt AVG Water1: %d", avg1 / points);
-    ESP_LOGI(TAG, "Volt AVG Water2: %d", avg2 / points);
-};
 
 void cont_prepare()
 {
@@ -548,9 +321,8 @@ void cont_measure1(bool printdata)
 
                         // Коррекция на сопротивление открытого нижнего ключа
                         p--; // 1-ый канал
-                        chan_num = p->type2.channel;
                         v = 0;
-                        if (chan_num == PIN_WATER1)
+                        if (p->type2.channel == PIN_WATER1)
                         {
                             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, p->type2.data, &v));
                             water_corr += v;
@@ -568,7 +340,7 @@ void cont_measure1(bool printdata)
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, 4095, &w2_max));
         w2 = (w2_max - water_max / water_max_cnt) * 100.0 / (w2_max - water_corr / water_corr_cnt);
         // result.measure.water2_last = get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, = %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.2") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
+        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, ~ %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.2") * (water_max / water_max_cnt - water_corr / water_corr_cnt) / (3300 - water_max / water_max_cnt));
 
         vTaskDelay(1);
 
@@ -600,18 +372,16 @@ void cont_measure1(bool printdata)
                     {
                         water_max += v;
                         water_max_cnt++;
-                        
+
                         // Коррекция на сопротивление открытого нижнего ключа
                         p++; // 2-ой канал
-                        chan_num = p->type2.channel;
                         v = 0;
-                        if (chan_num == PIN_WATER2)
+                        if (p->type2.channel == PIN_WATER2)
                         {
                             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, p->type2.data, &v));
                             water_corr += v;
                             water_corr_cnt++;
                         }
-
                     }
                 }
             }
@@ -624,8 +394,15 @@ void cont_measure1(bool printdata)
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, 4095, &w1_max));
         w1 = (w1_max - (water_max / water_max_cnt)) * 100.0 / (w1_max - (water_corr / water_corr_cnt));
         // result.measure.water1_last = get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, = %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.1") * water_max / water_max_cnt / (3300 - water_max / water_max_cnt));
+        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, ~ %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.1") * (water_max / water_max_cnt - water_corr / water_corr_cnt) / (3300 - water_max / water_max_cnt));
+
         result.measure.water = (w1 + w2) / 2.0;
+
+        // если большая разбежка в измерениях - верим только PIN_WATER1
+        if (fabs(w1 - w2) > 25.0)
+        {
+            result.measure.water = w1;
+        }
     }
 }
 
@@ -637,22 +414,21 @@ void dio_init()
 
     xQueueLed = xQueueCreate(2, sizeof(led_task_data_t));
 
-    ESP_ERROR_CHECK(gpio_hold_dis(PIN_LIGHT));
-    ESP_ERROR_CHECK(gpio_hold_dis(PIN_WATER3));
-
     // install gpio isr service
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1));
 
     // zero-initialize the config structure.
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_POSEDGE;
-    io_conf.pin_bit_mask = BIT64(PIN_BATT);
+    io_conf.pin_bit_mask = BIT64(PIN_BATT) | BIT64(PIN_INT_ACC);
     // set as input mode
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
     ESP_ERROR_CHECK(gpio_isr_handler_add(PIN_BATT, gpio_isr_handler, (void *)PIN_BATT));
+
+    ESP_ERROR_CHECK(gpio_isr_handler_add(PIN_INT_ACC, gpio_isr_handler, (void *)PIN_INT_ACC));
 
     cont_prepare();
     cont_measure1(true);
@@ -668,9 +444,6 @@ void dio_init()
 
     ESP_LOGI(TAG, "Light: %.1f%% (%d mV)", result.measure.light, l);
 
-    // Water1, Water2 - питание через резистор 10к
-    water1_mode = 'R';
-
     // Water3 - без подтяжек
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.pin_bit_mask = BIT64(PIN_LIGHT) | BIT64(PIN_WATER3);
@@ -678,30 +451,43 @@ void dio_init()
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
-    water2_mode = '0';
+
     result.measure.d_wet_mode = 0;
+    result.measure.d_light_mode = 0;
 
     vTaskDelay(1);
 
-    // Water2 - с подтяжкой
+    // Water - с подтяжкой
     if (gpio_get_level(PIN_WATER3) == 1)
     {
         gpio_pulldown_en(PIN_WATER3);
-        water2_mode = 'r';
         result.measure.d_wet_mode = 1;
         vTaskDelay(1);
         if (gpio_get_level(PIN_WATER3) == 1)
         {
             // нет смысла держать подтяжку. Экономим энергию
             gpio_pulldown_dis(PIN_WATER3);
-            water2_mode = '0';
             result.measure.d_wet_mode = 0;
+        }
+    }
+
+    // Light - с подтяжкой
+    if (gpio_get_level(PIN_LIGHT) == 1)
+    {
+        gpio_pulldown_en(PIN_LIGHT);
+        result.measure.d_light_mode = 1;
+        vTaskDelay(1);
+        if (gpio_get_level(PIN_LIGHT) == 1)
+        {
+            // нет смысла держать подтяжку. Экономим энергию
+            gpio_pulldown_dis(PIN_LIGHT);
+            result.measure.d_light_mode = 0;
         }
     }
 
     vTaskDelay(1);
 
-    ESP_LOGI(TAG, "Light: %d; Water: %d (%c%c); Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER3), water1_mode, water2_mode, gpio_get_level(PIN_BATT));
+    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '!' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '!' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
 }
 
 int get_charge()
@@ -718,7 +504,7 @@ int get_charge()
 
 uint64_t dio_sleep()
 {
-    ESP_LOGI(TAG, "Light: %d; Water: %d (%c%c); Charge: %d", gpio_get_level(PIN_LIGHT), gpio_get_level(PIN_WATER3), water1_mode, water2_mode, gpio_get_level(PIN_BATT));
+    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '!' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '!' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
 
     uint64_t wake_mask = 0;
     if (gpio_get_level(PIN_LIGHT) == 0)
@@ -736,6 +522,13 @@ uint64_t dio_sleep()
     if (gpio_get_level(PIN_BATT) == 0)
     {
         wake_mask |= BIT64(PIN_BATT);
+        ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
+    }
+
+    if (gpio_get_level(PIN_INT_ACC) == 0)
+    {
+        wake_mask |= BIT64(PIN_INT_ACC);
+        ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
     }
 
     ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_HIGH));
@@ -903,7 +696,7 @@ void btn_task(void *arg)
                 debounce = 0;
 
                 xTaskNotifyGive(xTaskDallas);
-                xTaskNotify(xTaskI2C, (NOTYFY_SENSOR_TH) | (NOTYFY_SENSOR_MAGACC), eSetBits);
+                xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
                 cont_measure1(false);
 
                 xTaskNotifyGive(xHandleWifi); // включаем WiFi;

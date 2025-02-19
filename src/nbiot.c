@@ -347,7 +347,7 @@ void modem_task(void *arg)
                 ESP_LOGW(TAG, "Modem not reply");
                 strcpy(net_status_current, "Modem not reply");
 
-                if ((xEventGroupGetBits(status_event_group) & END_WORK) || d_nbiot_error_counter-- == 0)
+                if ((xEventGroupGetBits(status_event_group) & END_WORK_NBIOT) || d_nbiot_error_counter-- == 0)
                     break;
 
                 // power on
@@ -412,7 +412,7 @@ void modem_task(void *arg)
                 try_counter++;
                 ESP_LOGW(TAG, "CPIN:\n%s", data);
 
-                if ((xEventGroupGetBits(status_event_group) & END_WORK) || d_nbiot_error_counter-- == 0)
+                if ((xEventGroupGetBits(status_event_group) & END_WORK_NBIOT) || d_nbiot_error_counter-- == 0)
                     break;
 
                 // Reset and Set Phone Functionality
@@ -745,16 +745,17 @@ void modem_task(void *arg)
         }
 
         // если есть бит END_WORK - то модуль уже выключили из main()
-        if ((xEventGroupGetBits(status_event_group) & END_WORK) == 0)
-        {
-            if (print_atcmd("AT+CPOWD=1\r\n", data) == ESP_OK)
-                strcpy(net_status_current, "Success OFF");
-            // print_atcmd("AT+CFUN=0\r\n", data);
-        }
-        else
-        {
-            strcpy(net_status_current, "Extern OFF");
-        }
+        // if ((xEventGroupGetBits(status_event_group) & END_WORK) == 0)
+        //{
+        // ВЫКЛЮЧАЕМ
+        if (print_atcmd("AT+CPOWD=1\r\n", data) == ESP_OK)
+            strcpy(net_status_current, "Success OFF");
+        // print_atcmd("AT+CFUN=0\r\n", data);
+        //}
+        // else
+        //{
+        //    strcpy(net_status_current, "Extern OFF");
+        //}
 
         xEventGroupSetBits(status_event_group, END_RADIO);
     }

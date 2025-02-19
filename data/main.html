@@ -4,6 +4,119 @@
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width" />
     <title>Настройки</title>
+
+    <style>
+      .sc-gauge {
+        width: 200px;
+        height: 200px;
+        margin: 10px;
+      }
+      .sc-background {
+        position: relative;
+        height: 100px;
+        margin-bottom: 5px;
+        background-color: LightGray;
+        border-radius: 150px 150px 0 0;
+        overflow: hidden;
+        text-align: center;
+      }
+      .sc-mask {
+        position: absolute;
+        top: 25px;
+        right: 25px;
+        left: 25px;
+        height: 75px;
+        background-color: White;
+        border-radius: 150px 150px 0 0;
+      }
+      .sc-percentage {
+        position: absolute;
+        top: -5%;
+        left: 47.5%;
+        width: 5%;
+        height: 100%;
+        background-color: Red;
+        transform: rotate(0deg);
+        transition: 1s;
+        transform-origin: bottom center;
+      }
+      .sc-min {
+        float: left;
+      }
+      .sc-max {
+        float: right;
+      }
+      .sc-value {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 100%;
+        font-size: 48px;
+        font-weight: 700;
+      }
+
+      .cubecontainer {
+        width: 200px;
+        height: 200px;
+        perspective: 600px;
+        margin: 100px 100px 0;
+        perspective-origin: center -100px;
+      }
+      .cube {
+        transform-style: preserve-3d;
+        width: 100%;
+        height: 100%;
+        position: relative;
+        transition: 300ms linear all;
+      }
+      .face {
+        position: absolute;
+      }
+      .top {
+        transform: rotateX(90deg) translateZ(60px);
+        background-color: rgb(35, 115, 161);
+        width: 100%;
+        height: 60%;
+      }
+      .sensor {
+        transform: rotateX(90deg) translateZ(10px);
+        border-radius: 33%;
+        background: #ff0000;
+        width: 20px;
+        height: 20px;
+        z-index: 1;
+      }
+      .bottom {
+        transform: rotateX(-90deg) translateZ(20px);
+        background-color: rgb(40, 90, 80);
+        width: 100%;
+        height: 60%;
+      }
+      .right {
+        transform: rotateY(90deg) translateZ(140px);
+        background-color: rgb(60, 90, 80);
+        width: 60%;
+        height: 40%;
+      }
+      .left {
+        transform: rotateY(-90deg) translateZ(60px);
+        background-color: rgb(80, 90, 80);
+        width: 60%;
+        height: 40%;
+      }
+      .front {
+        transform: rotateX(0deg) translateZ(60px);
+        background-color: rgb(100, 90, 80);
+        width: 100%;
+        height: 40%;
+      }
+      .back {
+        transform: rotateX(-180deg) translateZ(60px);
+        background-color: rgb(20, 90, 80);
+        width: 100%;
+        height: 40%;
+      }
+    </style>
   </head>
   <body>
     <form name="settings" action="" method="post" onsubmit="validate()">
@@ -12,37 +125,228 @@
     </form>
     <br />
     <div>
-      <input
-        type="checkbox"
-        id="accmag"
-        name="accmag"
-        onchange="toggleCheckbox(this)"
-      />
-      <label for="accmag">Read </label><b>ACC:</b>
-      <div id="accvalue" style="display: inline"></div>
-      <b>MAG:</b>
-      <div id="magvalue" style="display: inline"></div>
+      <table style="width: 300px">
+        <tr>
+          <th>
+            <input type="checkbox" id="accmag" name="accmag" onchange="toggleCheckbox(this)" />
+            <label for="accmag">Read </label>
+          </th>
+          <th>X</th>
+          <th>Y</th>
+          <th>Z</th>
+          <th>V</th>
+        </tr>
+        <tr>
+          <th style="width: 30%">ACC:</th>
+          <td>
+            <div id="accx" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">-2</span>
+              <span class="sc-max">2</span>
+            </div>
+          </td>
+          <td>
+            <div id="accy" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">-2</span>
+              <span class="sc-max">2</span>
+            </div>
+          </td>
+          <td>
+            <div id="accz" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">-2</span>
+              <span class="sc-max">2</span>
+            </div>
+          </td>
+          <td>
+            <div id="accv" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">0</span>
+              <span class="sc-max">4</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <th style="width: 30%">MAG:</th>
+          <td>
+            <div id="magx" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">-2</span>
+              <span class="sc-max">2</span>
+            </div>
+          </td>
+          <td>
+            <div id="magy" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">-2</span>
+              <span class="sc-max">2</span>
+            </div>
+          </td>
+          <td>
+            <div id="magz" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">-2</span>
+              <span class="sc-max">2</span>
+            </div>
+          </td>
+          <td>
+            <div id="magv" class="sc-gauge">
+              <div class="sc-background">
+                <div class="sc-percentage"></div>
+                <div class="sc-mask"></div>
+                <span class="sc-value">0.0</span>
+              </div>
+              <span class="sc-min">0</span>
+              <span class="sc-max">4</span>
+            </div>
+          </td>
+        </tr>
+      </table>
     </div>
+
+    <div class="cubecontainer" style="float: left">
+      <div id="cube" class="cube">
+        <div class="face front"></div>
+        <div class="face sensor"></div>
+        <div class="face back"></div>
+        <div class="face right"></div>
+        <div class="face left"></div>
+        <div class="face top"></div>
+        <div class="face bottom"></div>
+      </div>
+    </div>
+    <div style="height: 300px; display: inline-block">
+      <fieldset>
+        <legend>Дискретный сигнал</legend>
+        <fieldset>
+          <legend>Использовать</legend>
+          <input id="usemag" type="radio" name="use" value="mag" />
+          <label for="usemag">Магнитометр</label>
+          <input id="useacc" type="radio" name="use" value="acc" />
+          <label for="useacc">Акселерометр</label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Текущие параметры</legend>
+          <input type="checkbox" id="open" name="open" value="open" onchange="storeCheckbox(this)" />
+          <label for="open">Открыто</label><div id="openflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block" ></div><br />
+          <input type="checkbox" id="close" name="close" value="close" onchange="storeCheckbox(this)" />
+          <label for="close">Закрыто</label><div id="closeflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block" ></div><br />
+        </fieldset>
+      </fieldset>
+    </div>
+
     <p><a href="/d3">Буфер данных</a></p>
 
     <div id="filecontent"></div>
 
     <script>
+      var mag = ["0", "0", "0"];
+      var acc = ["0", "0", "0"];
+      var use = "";
+
       var socket = new WebSocket("ws://" + location.host + "/ws");
 
       socket.onopen = function () {
         socket.send("id=");
       };
 
+      function gauge_value(x, val) {
+        const parentDOM = document.getElementById(val);
+        parentDOM.getElementsByClassName("sc-value")[0].innerHTML = x.toFixed(1);
+        if (val == "accv" || val == "magv") {
+          if (x > 4) {
+            x = 4;
+          }
+          if (x < 0) {
+            x = 0;
+          }
+          parentDOM.getElementsByClassName("sc-percentage")[0].style.transform =
+            "rotate(" + ((x / 2) * 90 - 90) + "deg)";
+        } else if (((val == "magx" || val == "magy") && x == -6.1) || (val == "magz" && x == -6.8)) {
+          parentDOM.getElementsByClassName("sc-background")[0].style.backgroundColor = "Red"; //overload!!!
+        } else {
+          parentDOM.getElementsByClassName("sc-background")[0].style.backgroundColor = "LightGray";
+          if (x > 2) {
+            x = 2;
+          }
+          if (x < -2) {
+            x = -2;
+          }
+
+          parentDOM.getElementsByClassName("sc-percentage")[0].style.transform = "rotate(" + (x / 2) * 90 + "deg)";
+        }
+
+        return 0;
+      }
+
+      function calculateAngles(acX, acY, acZ) {
+        angleX = Math.atan2(acX, Math.sqrt(acY * acY + acZ * acZ)) * (180 / Math.PI);
+        angleY = Math.atan2(acY, Math.sqrt(acX * acX + acZ * acZ)) * (180 / Math.PI) * -1;
+        angleZ = Math.atan2(Math.sqrt(acX * acX + acY * acY), acZ) * (180 / Math.PI);
+
+        //console.log("angles x:" + angleX + "; y:" + angleY + "; z:" + angleZ);
+        console.log("rotateX(" + angleX + "deg) rotateY(" + angleY + "deg) rotateZ(" + angleZ + "deg)");
+
+        //document.getElementById("cube").style.transform = "rotateX(" + (angleX) + "deg) rotateY(" + (angleY) + "deg) rotateZ(" + angleZ + "deg)";
+        document.getElementById("cube").style.transform = "rotateX(" + angleY + "deg) rotateZ(" + angleX + "deg)";
+
+        return { angleX, angleY, angleZ };
+      }
+
       socket.onmessage = function (e) {
         //console.log(e);
         res = e.data.split(";");
         acc = res[0].split(" ");
         mag = res[1].split(" ");
-        document.getElementById("accvalue").innerHTML =
-          acc[0] + ",&nbsp" + acc[1] + ",&nbsp" + acc[2] + "&nbsp";
-        document.getElementById("magvalue").innerHTML =
-          mag[0] + ",&nbsp" + mag[1] + ",&nbsp" + mag[2] + "&nbsp";
+        flags = Number(res[2]);
+
+        gauge_value(Number(acc[0]), "accx");
+        gauge_value(Number(acc[1]), "accy");
+        gauge_value(Number(acc[2]), "accz");
+        gauge_value(Math.sqrt(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]), "accv");
+
+        calculateAngles(Number(acc[0]), Number(acc[1]), Number(acc[2]));
+
+        gauge_value(Number(mag[0]), "magx");
+        gauge_value(Number(mag[1]), "magy");
+        gauge_value(Number(mag[2]), "magz");
+        gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
+
+        if(flags & (1<<12)) document.getElementById("openflag").style.backgroundColor = "red";
+        else document.getElementById("openflag").style.backgroundColor = "transparent";
+
+        if(flags & (1<<13)) document.getElementById("closeflag").style.backgroundColor = "red";
+        else document.getElementById("closeflag").style.backgroundColor = "transparent";
       };
 
       window.onload = function () {
@@ -50,25 +354,49 @@
         var xhttp = new XMLHttpRequest();
         xhttp.onreadystatechange = function () {
           if (this.readyState == 4 && this.status == 200) {
-            document.getElementById("settingscontent").innerHTML =
-              this.response;
-            //console.log(this.response);
+            document.getElementById("settingscontent").innerHTML = this.response;
+            position = this.response.search('"Acc":');
+            s = this.response.substr(position + 7, 16);
+            end = s.search("]");
+            acc = s.substring(0, end).split(",");
+
+            position = this.response.search('"Mag":');
+            s = this.response.substr(position + 7, 16);
+            end = s.search("]");
+            mag = s.substring(0, end).split(",");
+
+            gauge_value(Number(acc[0]), "accx");
+            gauge_value(Number(acc[1]), "accy");
+            gauge_value(Number(acc[2]), "accz");
+            gauge_value(Math.sqrt(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]), "accv");
+
+            calculateAngles(Number(acc[0]), Number(acc[1]), Number(acc[2]));
+
+            gauge_value(Number(mag[0]), "magx");
+            gauge_value(Number(mag[1]), "magy");
+            gauge_value(Number(mag[2]), "magz");
+            gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
+
+            if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
+            if (document.getElementById("enableclosemagX").innerHTML) use = "mag";
+            if (document.getElementById("enableopenaccX").innerHTML) use = "acc";
+            if (document.getElementById("enablecloseaccX").innerHTML) use = "acc";
+
+            if (use == "mag") document.getElementById("usemag").checked = true;
+            if (use == "acc") document.getElementById("useacc").checked = true;
           }
         };
         xhttp.open("GET", "/menu", true);
         xhttp.send();
         xhttp.onload = function () {
           //console.log(document.getElementById("ip"));
-          document.getElementById("ip").value = num2string(
-            document.getElementById("ip").value
-          );
+          document.getElementById("ip").value = num2string(document.getElementById("ip").value);
         };
 
         var xhttp2 = new XMLHttpRequest();
         xhttp2.onreadystatechange = function () {
           if (this.readyState == 4 && this.status == 200) {
-            document.getElementById("filecontent").innerHTML =
-              this.response.replace(/(?:\r\n|\r|\n)/g, "<br>");
+            document.getElementById("filecontent").innerHTML = this.response.replace(/(?:\r\n|\r|\n)/g, "<br>");
             //console.log(this.response);
           }
         };
@@ -84,10 +412,61 @@
         }
       }
 
+      function storeCheckbox(element) {
+        if (document.getElementById("usemag").checked == true) use = "mag";
+        if (document.getElementById("useacc").checked == true) use = "acc";
+
+        if (element.checked == true) {
+          document.getElementById("enable" + element.name + use + "X").innerHTML = "Вкл";
+
+          if (use == "acc") {
+            document.getElementById(element.name + "accX").value =
+              Number(acc[0]) * 1000 + " " + Number(acc[1]) * 1000 + " " + Number(acc[2]) * 1000;
+          }
+
+          if (use == "mag") {
+            document.getElementById(element.name + "magX").value =
+              Number(mag[0]) * 1000 + " " + Number(mag[1]) * 1000 + " " + Number(mag[2]) * 1000;
+          }
+        } else {
+          document.getElementById("enable" + element.name + use + "X").innerHTML = "";
+        }
+      }
+
       function validate() {
-        document.getElementById("ip").value = string2num(
-          document.getElementById("ip").value
-        );
+        document.getElementById("ip").value = string2num(document.getElementById("ip").value);
+
+        if (document.getElementById("enableopenmagX").innerHTML) {
+          val = document.getElementById("openmagX").value.split(" ");
+          document.getElementById("openmagY").value = val[1];
+          document.getElementById("openmagZ").value = val[2];
+
+          document.getElementById("openmage").value = "1";
+        } else document.getElementById("openmage").value = "0";
+
+        if (document.getElementById("enableclosemagX").innerHTML) {
+          val = document.getElementById("closemagX").value.split(" ");
+          document.getElementById("closemagY").value = val[1];
+          document.getElementById("closemagZ").value = val[2];
+
+          document.getElementById("closemage").value = "1";
+        } else document.getElementById("closemage").value = "0";
+
+        if (document.getElementById("enableopenaccX").innerHTML) {
+          val = document.getElementById("openaccX").value.split(" ");
+          document.getElementById("openaccY").value = val[1];
+          document.getElementById("openaccZ").value = val[2];
+
+          document.getElementById("openacce").value = "1";
+        } else document.getElementById("openacce").value = "0";
+
+        if (document.getElementById("enablecloseaccX").innerHTML) {
+          val = document.getElementById("closeaccX").value.split(" ");
+          document.getElementById("closeaccY").value = val[1];
+          document.getElementById("closeaccZ").value = val[2];
+
+          document.getElementById("closeacce").value = "1";
+        } else document.getElementById("closeacce").value = "0";
       }
 
       function num2string(ip) {
@@ -95,9 +474,7 @@
       }
 
       function string2num(ip) {
-        return ip
-          .split(".")
-          .reduce((sum, x, i) => sum + (x << (8 * (3 - i))), 0);
+        return ip.split(".").reduce((sum, x, i) => sum + (x << (8 * (3 - i))), 0);
       }
     </script>
   </body>

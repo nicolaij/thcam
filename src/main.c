@@ -71,15 +71,16 @@ void app_main(void)
             ESP_LOGI("main", "Wake up from GPIO %d", pin);
 
             if (pin == PIN_BATT)
-            {
                 result.measure.d_charge = true;
-            }
 
             if (pin == PIN_LIGHT)
                 result.measure.d_light = true;
 
             if (pin == PIN_WATER2)
                 result.measure.d_water = true;
+
+            if (pin == PIN_INT_ACC)
+                result.measure.d_acc_int = true;
         }
         else
         {
@@ -106,6 +107,8 @@ void app_main(void)
     //  "Количество загрузок: "
     ESP_LOGI("main", "Boot number: %d", bootCount);
 
+    ESP_LOGI("main", "Free Heap: %u bytes", xPortGetFreeHeapSize());
+
     init_nvs();
     read_nvs_menu();
 
@@ -117,7 +120,8 @@ void app_main(void)
     xTaskNotifyGive(xTaskDallas);
 
     xTaskCreate(i2c_task, "i2c_task", 1024 * 6, NULL, configMAX_PRIORITIES - 10, &xTaskI2C);
-    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_MAGACC, eSetBits);
+    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
+    // xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
 
     // Light, Water
     dio_init();
@@ -177,6 +181,7 @@ void app_main(void)
     xTaskCreate(console_task, "console_task", 1024 * 10, NULL, configMAX_PRIORITIES - 15, NULL);
 
     xTaskCreate(wifi_task, "wifi_task", 1024 * 4, NULL, configMAX_PRIORITIES - 5, &xHandleWifi);
+
     if (result.measure.d_charge || get_charge()) // проснулись от зарядки
     {
         xEventGroupSetBits(status_event_group, NOW_CHARGE);
@@ -220,12 +225,15 @@ void app_main(void)
         } while (((uxBits & (nowake)) != 0));
     }
 
+    // заканчиваем работу NBIoT
+    xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
+
+    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
+
     old_result = result;
 
     history[history_pos] = result.measure;
     history_pos = (history_pos + 1) % HISTORY_SIZE;
-
-    xEventGroupSetBits(status_event_group, END_WORK);
 
     const char *filepath = "/spiffs/" DATAFILE;
     FILE *fd = NULL;
@@ -254,16 +262,22 @@ void app_main(void)
         fclose(fd);
     }
 
-    // если модуль nbiot не выключился - то выключаем принудительно
-    if ((uxBits & END_RADIO) == 0)
-    {
-        nbiot_power_off();
-    };
-
     if (maxfilesize > 0 && file_stat.st_size > (maxfilesize * 1024))
     {
         remove("/spiffs/old" DATAFILE);
         rename(filepath, "/spiffs/old" DATAFILE);
+    };
+
+    if ((uxBits & END_RADIO) == 0)
+    {
+        // даем время выключиться
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+
+    if ((uxBits & END_RADIO) == 0)
+    {
+        // если модуль nbiot не выключился - то выключаем принудительно
+        nbiot_power_off();
     };
 
     // Light, Water
@@ -276,16 +290,20 @@ void app_main(void)
             sleeptime = 15;
     };
 
+    //ESP_LOGI("main", "Free Heap: %u bytes", xPortGetFreeHeapSize());
+
     ESP_LOGI("result", OUT_JSON, get_menu_id("id"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
 
-    // если зарядка - сон 1 мин.
+    // если зарядка - сон 5 мин.
     if (xEventGroupGetBits(status_event_group) & NOW_CHARGE || get_charge() == 1)
-        sleeptime = 1;
+        sleeptime = 5;
 
     uint64_t time_in_us = sleeptime * 60ULL * 1000000ULL;
 
     ESP_LOGW("main", "Go sleep: %lld min", time_in_us / 60ULL / 1000000ULL);
-    // ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout,0xffff));
+
+    ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, 0xffff));
+
     fflush(stdout);
 
     esp_sleep_enable_timer_wakeup(time_in_us);

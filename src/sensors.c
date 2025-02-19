@@ -27,6 +27,16 @@ void BME280_delay_msek(u32 msek);
 
 #include "LSM303DLHC.h"
 
+bool check_range(int x, int y, int z, int setx, int sety, int setz)
+{
+    int devi = 1000 * get_menu_id("deviation") / 100; //% от 1g
+    if ((setx + devi) > x && (setx - devi) < x && (sety + devi) > y && (sety - devi) < y && (setz + devi) > z && (setz - devi) < z)
+    {
+        return true;
+    }
+    return false;
+}
+
 float get_temperature_sensor()
 {
     float internal_temp = 0;
@@ -146,6 +156,18 @@ void i2c_task(void *arg)
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_m_cfg, &lsm303M_handle));
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_a_cfg, &lsm303A_handle));
 
+    // scan
+    /*    for (int i = 0; i < 127; i++)
+        {
+            err_rc = i2c_master_probe(i2cbus_handle, i, 50);
+            if (err_rc == ESP_OK)
+            {
+                ESP_LOGI("i2c", "found addr %d", i);
+            }
+            vTaskDelay(1);
+        }
+    */
+
     TickType_t tm = 1000 / portTICK_PERIOD_MS;
 
     while (1)
@@ -170,7 +192,7 @@ void i2c_task(void *arg)
 
                 cmd = 0xe3; // Trigger Temperature Measurement
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(th_handle, &cmd, 1, 10));
-                vTaskDelay(50 / portTICK_PERIOD_MS); //14 bit 44-50 ms
+                vTaskDelay(50 / portTICK_PERIOD_MS); // 14 bit 44-50 ms
                 err_rc = i2c_master_receive(th_handle, buffer, 3, 10);
 
                 if (err_rc == ESP_OK)
@@ -183,7 +205,7 @@ void i2c_task(void *arg)
 
                 cmd = 0xe5; // Trigger Humidity Measurement
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(th_handle, &cmd, 1, 10));
-                vTaskDelay(20 / portTICK_PERIOD_MS); //12 bits 14-16 ms
+                vTaskDelay(20 / portTICK_PERIOD_MS); // 12 bits 14-16 ms
                 err_rc = i2c_master_receive(th_handle, buffer, 3, 10);
                 if (err_rc == ESP_OK)
                 {
@@ -226,11 +248,11 @@ void i2c_task(void *arg)
                     if (com_rslt == SUCCESS)
                     {
                         result.measure.temp = bme280_compensate_temperature_double(v_uncomp_temperature_s32);
-                        result.measure.pressure = bme280_compensate_pressure_double(v_uncomp_pressure_s32) / 100; // Pa -> hPa
+                        // result.measure.pressure = bme280_compensate_pressure_double(v_uncomp_pressure_s32) / 100; // Pa -> hPa
                         result.measure.humidity = bme280_compensate_humidity_double(v_uncomp_humidity_s32);
                         ESP_LOGI(TAG_BME280, "%.2f degC / %.3f hPa / %.3f %%",
                                  result.measure.temp,
-                                 result.measure.pressure,
+                                 bme280_compensate_pressure_double(v_uncomp_pressure_s32) / 100,
                                  result.measure.humidity);
 
                         result.measure.d_thsensor_error = false;
@@ -252,63 +274,181 @@ void i2c_task(void *arg)
         if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_STOP)
         {
             xTaskNotify(xTaskGetCurrentTaskHandle(), 0, eSetValueWithOverwrite);
-        }
-        else
+        };
+
+        if (result.measure.d_mag_sensor_error)
+            continue;
+
+        if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_GET_INT)
         {
-            if ((ulNotifiedValue & NOTYFY_SENSOR_MAGACC) && result.measure.d_mag_sensor_error == false)
+            // clear INT1
+            uint8_t int1 = LSM303DLHC_getAccelInterrupt1Source();
+            uint8_t click = LSM303DLHC_getAccelClickSource();
+
+            int16_t ax, ay, az;
+            LSM303DLHC_getAcceleration(&ax, &ay, &az);
+
+            ESP_LOGD("LSM303", "INT1 src=%02x; CLICK src=%02x; ACC=%4d;%4d;%4d", int1, click, (ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2);
+
+            if (get_menu_id("openacce"))
             {
-                tm = 1000 / portTICK_PERIOD_MS;
-
-                LSM303DLHC_initialize();
-                LSM303DLHC_setAccelFullScale(4); // 4G
-
-                // set accel data rate to 1Hz
-                LSM303DLHC_setAccelOutputDataRate(1);
-                LSM303DLHC_setMagOutputDataRate(1);
-
-                LSM303DLHC_setMagGain(_lsm303Mag_Gauss_LSB_XY);
-                if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_CONT)
-                {
-                    LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
-                    nbiot_power_off();
-                }
-                else if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_SPEEDCONT)
-                {
-                    LSM303DLHC_setAccelOutputDataRate(10);
-                    LSM303DLHC_setMagOutputDataRate(10);
-                    LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
-                    nbiot_power_off();
-                    tm = 100 / portTICK_PERIOD_MS;
-                }
-                else
-                {
-                    LSM303DLHC_setMagMode(LSM303DLHC_MD_SINGLE);
-                }
+                result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("openaccX"), get_menu_id("openaccY"), get_menu_id("openaccZ"));
+            }
+            if (get_menu_id("closeacce"))
+            {
+                result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("closeaccX"), get_menu_id("closeaccY"), get_menu_id("closeaccZ"));
             }
 
-            if ((ulNotifiedValue & (NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT)) && result.measure.d_mag_sensor_error == false)
+            // xTaskNotify(xTaskGetCurrentTaskHandle(), 0, eSetValueWithOverwrite);
+        }
+
+        if ((ulNotifiedValue & NOTYFY_SENSOR_SET_MAGACC))
+        {
+            tm = 1000 / portTICK_PERIOD_MS;
+
+            LSM303DLHC_initialize();
+            LSM303DLHC_setAccelFullScale(4); // 4G
+
+            // set accel data rate to 1Hz
+            LSM303DLHC_setAccelOutputDataRate(1);
+            LSM303DLHC_setMagOutputDataRate(1);
+
+            LSM303DLHC_setAccelLowPowerEnabled(false);
+            LSM303DLHC_setAccelHighResOutputEnabled(true);
+
+            LSM303DLHC_setAccelINT1AOI1Enabled(false);
+
+            LSM303DLHC_setMagGain(670);
+
+            if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_CONT)
             {
-                esp_err_t ret;
-                int16_t ax, ay, az;
-                int16_t mx, my, mz;
-                ret = LSM303DLHC_getAcceleration(&ax, &ay, &az);
+                // заканчиваем работу NBIoT
+                xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
+
+                LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
+                // nbiot_power_off();
+            }
+            else if (ulNotifiedValue & NOTYFY_SENSOR_MAGACC_SPEEDCONT) // WiFi
+            {
+                // заканчиваем работу NBIoT
+                // xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
+
+                LSM303DLHC_setAccelOutputDataRate(10);
+                LSM303DLHC_setMagOutputDataRate(15);
+                LSM303DLHC_setMagMode(LSM303DLHC_MD_CONTINUOUS);
+                // nbiot_power_off();
+                tm = 100 / portTICK_PERIOD_MS;
+            }
+            else
+            {
+                LSM303DLHC_setMagMode(LSM303DLHC_MD_SINGLE);
+            }
+
+            // xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_MAGACC, eSetValueWithOverwrite);
+        };
+
+        if ((ulNotifiedValue & (NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT)))
+        {
+            esp_err_t ret;
+            int16_t ax, ay, az;
+            int16_t mx, my, mz;
+            ret = LSM303DLHC_getAcceleration(&ax, &ay, &az);
+            if (ret != ESP_OK)
+            {
+                result.measure.d_mag_sensor_error = true;
+            }
+            else
+            {
                 ret = LSM303DLHC_getMag(&mx, &my, &mz);
-                if (ret != ESP_OK)
-                {
-                    result.measure.d_mag_sensor_error = true;
-                }
                 //  Calculation by scale
+                /*
                 result.measure.acc[0] = (float)(ax >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
                 result.measure.acc[1] = (float)(ay >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
                 result.measure.acc[2] = (float)(az >> _lsm303Acc_SHIFT) * _lsm303Acc_LSB * SENSORS_GRAVITY_STANDARD;
                 result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
-                result.measure.mag[1] = (float)my / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
-                result.measure.mag[2] = (float)mz / _lsm303Mag_Gauss_LSB_Z * SENSORS_GAUSS_TO_MICROTESLA;
+                result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
+                result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
+                */
+                result.measure.acc[0] = (float)((ax >> 4) * 2) / 1000.0; // + - 4g
+                result.measure.acc[1] = (float)((ay >> 4) * 2) / 1000.0; // + - 4g
+                result.measure.acc[2] = (float)((az >> 4) * 2) / 1000.0; // + - 4g
+
+                result.measure.mag[0] = (float)(mx) / 670.0; //+ - 2.5 Gauss
+                result.measure.mag[1] = (float)(my) / 670.0; //+ - 2.5 Gauss
+                result.measure.mag[2] = (float)(mz) / 600.0; //+ - 2.5 Gauss
+
                 ESP_LOGI("LSM303", "acc=%2.1f %2.1f %2.1f; mag=%3.1f %3.1f %3.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
 
-                xEventGroupSetBits(status_event_group, END_MAG_SENSOR);
+                if (get_menu_id("openacce"))
+                {
+                    result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("openaccX"), get_menu_id("openaccY"), get_menu_id("openaccZ"));
+                }
+                if (get_menu_id("openmage"))
+                {
+                    result.measure.open = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_id("openmagX"), get_menu_id("openmagY"), get_menu_id("openmagZ"));
+                }
+                if (get_menu_id("closeacce"))
+                {
+                    result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("closeaccX"), get_menu_id("closeaccY"), get_menu_id("closeaccZ"));
+                }
+                if (get_menu_id("closemage"))
+                {
+                    result.measure.close = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_id("closemagX"), get_menu_id("closemagY"), get_menu_id("closemagZ"));
+                }
+
+                xEventGroupSetBits(status_event_group, READ_MAG_SENSOR);
             }
         }
+
+        if ((ulNotifiedValue & NOTYFY_SENSOR_SET_MAGACC_INT))
+        {
+            LSM303DLHC_setAccelOutputDataRate(1);
+            LSM303DLHC_setMagOutputDataRate(0);
+            LSM303DLHC_setAccelLowPowerEnabled(true);
+            LSM303DLHC_setAccelHighResOutputEnabled(false);
+
+            LSM303DLHC_setAccelInterrupt1RequestLatched(true);
+            LSM303DLHC_setAccelInterruptActiveLowEnabled(false);
+
+            int16_t ax, ay, az;
+            LSM303DLHC_getAcceleration(&ax, &ay, &az);
+            ESP_LOGD("LSM303", "ACC=%4d;%4d;%4d", (ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2);
+
+            uint8_t int_mask = BIT(LSM303DLHC_INT1_XLIE_XDOWNE_BIT) | BIT(LSM303DLHC_INT1_XHIE_XUPE_BIT) | BIT(LSM303DLHC_INT1_YLIE_YDOWNE_BIT) | BIT(LSM303DLHC_INT1_YHIE_YUPE_BIT) | BIT(LSM303DLHC_INT1_ZLIE_ZDOWNE_BIT) | BIT(LSM303DLHC_INT1_ZHIE_ZUPE_BIT);
+
+            if ((ax >> 4) * 2 > 500)
+                int_mask &= ~BIT(LSM303DLHC_INT1_XHIE_XUPE_BIT);
+            if ((ax >> 4) * 2 < -500)
+                int_mask &= ~BIT(LSM303DLHC_INT1_XLIE_XDOWNE_BIT);
+            if ((ay >> 4) * 2 > 500)
+                int_mask &= ~BIT(LSM303DLHC_INT1_YHIE_YUPE_BIT);
+            if ((ay >> 4) * 2 < -500)
+                int_mask &= ~BIT(LSM303DLHC_INT1_YLIE_YDOWNE_BIT);
+            if ((az >> 4) * 2 > 500)
+                int_mask &= ~BIT(LSM303DLHC_INT1_ZHIE_ZUPE_BIT);
+            if ((az >> 4) * 2 < -500)
+                int_mask &= ~BIT(LSM303DLHC_INT1_ZLIE_ZDOWNE_BIT);
+
+            // setup INT1 (all axis)
+            writeByte(LSM303DLHC_DEFAULT_ADDRESS_A, LSM303DLHC_RA_INT1_CFG_A, int_mask | BIT(LSM303DLHC_INT1_6D_BIT));
+            LSM303DLHC_setAccelInterrupt1Threshold(128 / 8); //(set 0.5g) 1 LSB = full-scale / 128
+            LSM303DLHC_setAccelInterrupt1Duration(1);
+
+            // writeByte(LSM303DLHC_DEFAULT_ADDRESS_A, LSM303DLHC_RA_CLICK_SRC_A, 0b01101100); // Double-click enable,  negative detection, Z
+
+            // LSM303DLHC_setAcceLClickThreshold(128 / 8); // 1 LSB = full-scale / 128
+            //   LSM303DLHC_setAcceLClickTimeLimit(2);       // 1 LSB = 1/ODR
+            //   LSM303DLHC_setAcceLClickTimeLatency(1);     // 1 LSB = 1/ODR
+            //   LSM303DLHC_setAcceLClickTimeWindow(3);      // 1 LSB = 1/ODR
+
+            // LSM303DLHC_setAccelINT1ClickEnabled(true);
+            LSM303DLHC_setAccelINT1AOI1Enabled(true);
+
+            // LSM303DLHC_setAccelINT2ClickEnabled(true);
+            // LSM303DLHC_setAccelINT2Interrupt1Enabled(true);
+
+            xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_MAGACC_GET_INT, eSetBits);
+        };
     }
 }
 

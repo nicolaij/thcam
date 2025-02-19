@@ -265,20 +265,18 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAGH, "Sending file : %s (%ld bytes)...", filepath, file_stat.st_size);
-
     httpd_resp_set_type(req, ((down_data_t *)(req->user_ctx))->content);
+
     int l = strlen(filepath);
     if (filepath[l - 3] == '.' && filepath[l - 2] == 'g' && filepath[l - 1] == 'z')
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
 
+    ESP_LOGI(TAGH, "Sending file : %s (%ld bytes)...", filepath, file_stat.st_size);
+
     size_t chunksize;
-    // int n = 0;
     do
     {
-        // memset(buf, 0, sizeof(buf));
         chunksize = fread(buf, 1, sizeof(buf), fd);
-        // printf("fread %d\n", chunksize);
 
         if (chunksize > 0)
         {
@@ -332,15 +330,25 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
         l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>Charge complete <b>");
     }
 
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "NB-IoT: <b>%s</b> ", net_status_current);
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", NB-IoT: <b>%s</b> ", net_status_current);
 
     if (strlen(pdp_ip) > 0)
-        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "IP: %s", pdp_ip);
+        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", IP: %s", pdp_ip);
+
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", Error: <b>%s %s %s %s</b>", (result.measure.d_thsensor_error == 1) ? "TH" : "", (result.measure.d_dallas_sensor_error == 1) ? "DS" : "", (result.measure.d_mag_sensor_error == 1) ? "ACC/MAG" : "", (result.measure.d_nbiot_error == 1) ? "NBIoT" : "");
+
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", OPEN: <b>%s</b> ", (result.measure.open == 1) ? "1" : "0");
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", CLOSE: <b>%s</b> ", (result.measure.close == 1) ? "1" : "0");
 
     httpd_resp_send_chunk(req, buf, l);
 
-    l = get_menu_html(buf);
-    httpd_resp_send_chunk(req, buf, l);
+    do
+    {
+        l = get_menu_html(buf);
+        if (l > 0)
+            httpd_resp_send_chunk(req, buf, l);
+
+    } while (l > 0);
 
     httpd_resp_sendstr_chunk(req, NULL);
 
@@ -354,8 +362,7 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
     while (remaining > 0)
     {
         /* Read the data for the request */
-        if ((ret = httpd_req_recv(req, buf,
-                                  MIN(remaining, sizeof(buf)))) <= 0)
+        if ((ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)))) <= 0)
         {
             if (ret == HTTPD_SOCK_ERR_TIMEOUT)
             {
@@ -382,9 +389,32 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
         char *e = strchr(s, '=');
         *e = '\0';
         strncpy(name, s, sizeof(name));
+
         int v = atoi(e + 1);
+
+        ESP_LOGD("menu_post_handler", "Name  \"%s\" : \"%i\"", name, v);
+
         set_menu_id(name, v);
 
+        /*
+                if (strncmp((const char *)(name), "openaccX", 8) == 0 || strncmp((const char *)(name), "openmagX", 8) == 0 || strncmp((const char *)(name), "closeaccX", 9) == 0 || strncmp((const char *)(name), "closemagX", 9) == 0)
+                {
+                    e = strchr(e + 1, ';');
+                    v = atoi(e + 1);
+                    name[strlen(name) - 1] = 'Y';
+                    set_menu_id(name, v);
+
+                    e = strchr(e + 1, ';');
+                    v = atoi(e + 1);
+                    name[strlen(name) - 1] = 'Z';
+                    set_menu_id(name, v);
+
+                    e = strchr(e + 1, ';');
+                    v = atoi(e + 1);
+                    name[strlen(name) - 1] = 'e';
+                    set_menu_id(name, v);
+                }
+        */
         s = strchr(e + 1, '&');
         if (s)
             s = s + 1;
@@ -628,18 +658,20 @@ static esp_err_t ws_handler(httpd_req_t *req)
     {
         if (strncmp((const char *)(&ws_pkt.payload[3]), "accmag", 6) == 0)
         {
-            xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_SPEEDCONT, eSetBits);
+            xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC_SPEEDCONT, eSetValueWithOverwrite);
             // return trigger_async_send(req->handle, req);
             async_resp_arg.fd = httpd_req_to_sockfd(req);
             async_resp_arg.hd = req->handle;
 
-            //ESP_LOGI(TAGH, "fd: %d", async_resp_arg.fd);
+            // ESP_LOGI(TAGH, "fd: %d", async_resp_arg.fd);
         }
         else
         {
-            xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC_STOP, eSetBits);
+            xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
             async_resp_arg.fd = 0;
         }
+
+        reset_sleep_timeout();
     }
 
     free(buf);
@@ -724,25 +756,25 @@ static const httpd_uri_t menu_post = {
     .handler = menu_post_handler,
     .user_ctx = &((down_data_t){.filepath = "/spiffs/main.html", .content = "text/html"})};
 
-httpd_uri_t update_get = {
+static const httpd_uri_t update_get = {
     .uri = "/update",
     .method = HTTP_GET,
     .handler = download_get_handler,
     .user_ctx = &((down_data_t){.filepath = "/spiffs/update.html", .content = "text/html"})};
 
-httpd_uri_t update_post = {
+static const httpd_uri_t update_post = {
     .uri = "/update",
     .method = HTTP_POST,
     .handler = update_post_handler,
     .user_ctx = NULL};
 
-httpd_uri_t data_csv = {
+static const httpd_uri_t data_csv = {
     .uri = "/d.csv",
     .method = HTTP_GET,
     .handler = d_get,
     .user_ctx = NULL};
 
-httpd_uri_t d3 = {
+static const httpd_uri_t d3 = {
     .uri = "/d3",
     .method = HTTP_GET,
     .handler = download_get_handler,
@@ -752,8 +784,31 @@ static const httpd_uri_t d3_get_gz = {
     .uri = "/d3.min.js",
     .method = HTTP_GET,
     .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/d3.min.js.gz", .content = "application/javascript"}),
-};
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/d3.min.js.gz", .content = "application/javascript"})};
+
+static const httpd_uri_t d33d = {
+    .uri = "/d33d",
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/d33d.html", .content = "text/html"})};
+
+static const httpd_uri_t x3dom_css = {
+    .uri = "/x3dom.css",
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/x3dom.css", .content = "text/html"})};
+
+static const httpd_uri_t x3dom_gz = {
+    .uri = "/x3dom.js",
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/x3dom.js.gz", .content = "application/javascript"})};
+
+static const httpd_uri_t d3_x3d_gz = {
+    .uri = "/d3-x3d.min.js",
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = &((down_data_t){.filepath = "/spiffs/d3-x3d.min.js.gz", .content = "application/javascript"})};
 
 static const httpd_uri_t ws = {
     .uri = "/ws",
@@ -773,7 +828,7 @@ static httpd_handle_t start_webserver(void)
     // config.recv_wait_timeout = 30;
     // config.task_priority = 6;
     // config.close_fn = ws_close_fn;
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 16;
 
     // Start the httpd server
     ESP_LOGI(TAGH, "Starting server on port: '%d'", config.server_port);
@@ -794,6 +849,11 @@ static httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &data_csv);
         httpd_register_uri_handler(server, &d3);
         httpd_register_uri_handler(server, &d3_get_gz);
+
+        httpd_register_uri_handler(server, &d33d);
+        httpd_register_uri_handler(server, &x3dom_css);
+        httpd_register_uri_handler(server, &x3dom_gz);
+        httpd_register_uri_handler(server, &d3_x3d_gz);
 
         httpd_register_uri_handler(server, &ws);
 
@@ -846,16 +906,16 @@ void wifi_task(void *arg)
 
         EventBits_t uxBits = xEventGroupWaitBits(
             status_event_group, //* The event group being tested.
-            END_MAG_SENSOR,     //* The bits within the event group to wait for.
+            READ_MAG_SENSOR,    //* The bits within the event group to wait for.
             pdTRUE,             //* BIT_0 & BIT_1 should be cleared before returning.
             pdFALSE,            //* ОБА
             100 / portTICK_PERIOD_MS);
 
-        if ((uxBits & END_MAG_SENSOR) && async_resp_arg.fd > 0)
+        if ((uxBits & READ_MAG_SENSOR) && async_resp_arg.fd > 0)
         {
             httpd_ws_frame_t ws_pkt;
             char accbuf[48];
-            ws_pkt.len = sprintf(accbuf, "%3.1f %3.1f %3.1f;%3.1f %3.1f %3.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
+            ws_pkt.len = sprintf(accbuf, "%3.1f %3.1f %3.1f;%3.1f %3.1f %3.1f;0x%04X", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2], result.measure.flags);
             ws_pkt.payload = (uint8_t *)accbuf;
             ws_pkt.type = HTTPD_WS_TYPE_TEXT;
 
@@ -866,7 +926,7 @@ void wifi_task(void *arg)
             };
         }
 
-        if (uxBits & END_WORK)
+        if (uxBits & END_WORK_NBIOT)
         {
             esp_wifi_stop();
             xEventGroupSetBits(status_event_group, END_WIFI);

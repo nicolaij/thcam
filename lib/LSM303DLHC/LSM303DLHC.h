@@ -392,6 +392,9 @@ extern i2c_master_dev_handle_t lsm303M_handle;
 void LSM303DLHC_initialize();
 bool LSM303DLHC_testConnection();
 
+
+esp_err_t writeByte(uint8_t devAddr, uint8_t regAddr, uint8_t val);
+
 // ----------------------------------------------------------------------------
 // STUB TODO:
 // Declare methods to fully cover all available functionality provided by the

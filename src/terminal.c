@@ -28,10 +28,27 @@ menu_t menu[] = {
     {.id = "ip", .name = "IP сервера", .izm = "", .val = ((10 << 24) | (179 << 16) | (40 << 8) | (20)), .min = INT32_MIN, .max = INT32_MAX},
     {.id = "tcpport", .name = "TCP порт сервера (0: не исп.)", .izm = "", .val = 48885, .min = 0, .max = 65535},
     {.id = "udpport", .name = "UDP порт сервера (0: не исп.)", .izm = "", .val = 0, .min = 0, .max = 65535},
-    {.id = "filesize", .name = "Макс. размер файла /data.csv", .izm = "кБ", .val = 192, .min = 0, .max = 200},
+    {.id = "filesize", .name = "Макс. размер файла /data.csv", .izm = "кБ", .val = 128, .min = 0, .max = 200},
     {.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
     {.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
     {.id = "uadc", .name = "Опорное напряжение", .izm = "мВ", .val = 2851, .min = 1, .max = 4000},
+    {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 11
+    {.id = "openaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "openaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "openacce", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
+    {.id = "closeaccX", .name = "ACC Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 15
+    {.id = "closeaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "closeaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "closeacce", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
+    {.id = "openmagX", .name = "MAG Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 19
+    {.id = "openmagY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "openmagZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "openmage", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
+    {.id = "closemagX", .name = "MAG Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 23
+    {.id = "closemagY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "closemagZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
+    {.id = "closemage", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
+    {.id = "deviation", .name = "Допустимое отклонение +-", .izm = "%", .val = 50, .min = 0, .max = 100}, // 27
     //{.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
 
@@ -128,21 +145,27 @@ int get_menu_id(const char *id)
 
 esp_err_t set_menu_id(const char *id, int value)
 {
-    esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
-    if (err == ESP_OK)
+    esp_err_t err = ESP_OK;
+
+    for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
     {
-        for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+        int l = strlen(menu[i].id);
+
+        if (strncmp(id, menu[i].id, l) == 0)
         {
-            int l = strlen(menu[i].id);
-            if (strncmp(id, menu[i].id, l) == 0)
+            if (menu[i].val != value)
             {
+                err = nvs_open("storage", NVS_READWRITE, &my_handle);
+
+                ESP_LOGD("NVS", "Write  \"%s\" : \"%i\"", menu[i].id, value);
                 err = nvs_set_i32(my_handle, id, value);
                 menu[i].val = value;
-                break;
+                nvs_close(my_handle);
             }
+            break;
         }
     }
-    nvs_close(my_handle);
+
     return err;
 }
 
@@ -166,12 +189,51 @@ int get_menu_json(char *buf)
 int get_menu_html(char *buf)
 {
     int pos = 0;
-    pos += sprintf(&buf[pos], "<table>");
-    for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+    static int index = 0;
+
+    if (index == 0)
+        pos += sprintf(&buf[pos], "<table>");
+
+    for (int i = index; i < sizeof(menu) / sizeof(menu_t); i++)
     {
-        pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%li\"/>%s</td><tr>\n", menu[i].id, menu[i].name, menu[i].id, menu[i].id, menu[i].val, menu[i].izm);
+        if (strlen(menu[i].name) > 0)
+        {
+            if (i == 11 || i == 15 || i == 19 || i == 23) // XYZ
+            {
+                char e[8] = {0};
+                if (menu[i + 3].val)
+                {
+                    strcpy(e, "Вкл");
+                };
+
+                pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%li %li %li\"/><b id=\"enable%s\">%s</b></td></tr>\n", menu[i].id, menu[i].name, menu[i].id, menu[i].id, menu[i].val, menu[i + 1].val, menu[i + 2].val, menu[i].id, e);
+            }
+            else
+            {
+                pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%li\"/>%s</td></tr>\n", menu[i].id, menu[i].name, menu[i].id, menu[i].id, menu[i].val, menu[i].izm);
+            }
+        }
+        else
+        {
+            pos += sprintf(&buf[pos], "<input type=\"hidden\" id=\"%s\" name=\"%s\" value=\"%li\">", menu[i].id, menu[i].id, menu[i].val);
+        }
+
+        if (pos > CONFIG_LWIP_TCP_MSS - 256)
+        {
+            index = i + 1;
+            return pos;
+        }
     }
-    pos += sprintf(&buf[pos], "</table><br>");
+
+    if (pos > 0)
+    {
+        index = sizeof(menu) / sizeof(menu_t);
+        pos += sprintf(&buf[pos], "</table><br>");
+    }
+    else
+    {
+        index = 0;
+    }
 
     return pos;
 }
@@ -309,13 +371,23 @@ void console_task(void *arg)
                     }
                     else if (n == sizeof(menu) / sizeof(menu_t) + 3) // Непрерывный опрос MAG/ACC
                     {
-                        xTaskNotify(xTaskI2C, NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_CONT, eSetBits);
-                        xEventGroupSetBits(status_event_group, NB_TERMINAL);
-                        nbiot_power_off();
+                        xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC_CONT, eSetValueWithOverwrite);
+                        // заканчиваем работу NBIoT
+                        xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
+                        // nbiot_power_off();
                         wait_max_counter = 3;
                         enter_value = 0;
                     }
-                    else if (n == sizeof(menu) / sizeof(menu_t) + 4) // WiFi
+                    else if (n == sizeof(menu) / sizeof(menu_t) + 4) // test MAG/ACC
+                    {
+                        xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT | NOTYFY_SENSOR_MAGACC_CONT, eSetValueWithOverwrite);
+                        // заканчиваем работу NBIoT
+                        xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
+                        // nbiot_power_off();
+                        wait_max_counter = 3;
+                        enter_value = 0;
+                    }
+                    else if (n == sizeof(menu) / sizeof(menu_t) + 5) // WiFi
                     {
                         xTaskNotifyGive(xHandleWifi); // включаем WiFi
 
@@ -335,11 +407,15 @@ void console_task(void *arg)
                         int i = 0;
                         for (i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
                         {
-                            ESP_LOGI("menu", "%2i. %s: %li %s", i + 1, menu[i].name, menu[i].val, menu[i].izm);
+                            if (strlen(menu[i].name) == 0)
+                                ESP_LOGI("menu", "%2i. %s: %li %s", i + 1, menu[i].id, menu[i].val, menu[i].izm);
+                            else
+                                ESP_LOGI("menu", "%2i. %s: %li %s", i + 1, menu[i].name, menu[i].val, menu[i].izm);
                         }
                         ESP_LOGI("menu", "%2i. История: %i", ++i, bootCount);
                         ESP_LOGI("menu", "%2i. AT терминал NBIoT", ++i);
                         ESP_LOGI("menu", "%2i. Непреравный опрос Mag/Acc", ++i);
+                        ESP_LOGI("menu", "%2i. Проверка Mag/Acc", ++i);
                         ESP_LOGI("menu", "%2i. WiFi On", ++i);
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = 0;
