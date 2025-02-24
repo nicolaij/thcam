@@ -51,6 +51,8 @@ uint8_t adcresult[points * sizeof(int)] = {0};
 int *adcresult32_1 = (int *)adcresult;
 int *adcresult32_2 = (int *)(adcresult + points * sizeof(int));
 
+const TickType_t pulldown_switch_time = 10;
+
 /*
 
 float u1 = 3.3;
@@ -148,7 +150,7 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
     }
 }
 
-static void oneshot_adc_init()
+static void light_adc_init()
 {
     //-------------ADC1 Init---------------//
     adc_oneshot_unit_init_cfg_t init_config1 = {
@@ -173,7 +175,7 @@ static void oneshot_adc_init()
     ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&l_cali_config, &l_cal_handle));
 }
 
-static void continuous_adc_init()
+static void water_continuous_adc_init()
 {
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BLOCKSIZE,
@@ -212,11 +214,9 @@ static void continuous_adc_init()
     ESP_ERROR_CHECK(adc_continuous_config(cont_handle, &dig_cfg));
 }
 
-static portMUX_TYPE my_spinlock = portMUX_INITIALIZER_UNLOCKED;
-
-void cont_prepare()
+void water_cont_prepare()
 {
-    continuous_adc_init();
+    water_continuous_adc_init();
 
     // ESP_LOGI(TAG, "calibration scheme version is %s", "Curve Fitting");
     adc_cali_curve_fitting_config_t cali_config1 = {
@@ -236,9 +236,8 @@ void cont_prepare()
     ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_config2, &cal_handle2));
 }
 
-void cont_measure1(bool printdata)
+void water_cont_measure(bool printdata)
 {
-
     uint32_t ret_num = 0;
     esp_err_t ret = 0;
     uint8_t *buf = adcresult;
@@ -339,8 +338,15 @@ void cont_measure1(bool printdata)
         float w2 = 0;
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, 4095, &w2_max));
         w2 = (w2_max - water_max / water_max_cnt) * 100.0 / (w2_max - water_corr / water_corr_cnt);
+
+        int batt = result.measure.nbbattery;
+        if (batt == 0)
+            batt = old_result.measure.nbbattery;
+        if (batt == 0)
+            batt = 3300;
+
         // result.measure.water2_last = get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, ~ %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.2") * (water_max / water_max_cnt - water_corr / water_corr_cnt) / (3300 - water_max / water_max_cnt));
+        ESP_LOGI("Water2", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, ~ %d Ом", PIN_WATER2, w2, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_val_by_id("r1.2") * (water_max / water_max_cnt - water_corr / water_corr_cnt) / (batt - water_max / water_max_cnt));
 
         vTaskDelay(1);
 
@@ -393,8 +399,9 @@ void cont_measure1(bool printdata)
         float w1 = 0;
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, 4095, &w1_max));
         w1 = (w1_max - (water_max / water_max_cnt)) * 100.0 / (w1_max - (water_corr / water_corr_cnt));
+
         // result.measure.water1_last = get_menu_id("r1.1") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, ~ %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_id("r1.1") * (water_max / water_max_cnt - water_corr / water_corr_cnt) / (3300 - water_max / water_max_cnt));
+        ESP_LOGI("Water1", "ADC chan %d: max: %.1f%% (%d мВ), corr %d, ~ %d Ом", PIN_WATER1, w1, water_max / water_max_cnt, water_corr / water_corr_cnt, get_menu_val_by_id("r1.1") * (water_max / water_max_cnt - water_corr / water_corr_cnt) / (batt - water_max / water_max_cnt));
 
         result.measure.water = (w1 + w2) / 2.0;
 
@@ -404,6 +411,70 @@ void cont_measure1(bool printdata)
             result.measure.water = w1;
         }
     }
+}
+
+void light_measure(int test_count)
+{
+    const int reads = 3;
+    float top = get_menu_val_by_id("lightrang");
+
+    int l_max = 0;
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(l_cal_handle, 4095, &l_max));
+
+    int light2 = 0;
+    gpio_pulldown_en(PIN_LIGHT);
+
+    for (int i = 0; i < test_count; i++)
+    {
+        // ESP_ERROR_CHECK(adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &l));
+        adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &light2);
+        ESP_LOGI(TAG, "%2d Light1 R: %d mV", i, light2);
+    }
+
+    vTaskDelay(1);
+
+    int sum = 0;
+    int cnt = 0;
+    for (int i = 0; i < reads; i++)
+    {
+        esp_err_t e = adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &light2);
+        if (e == ESP_OK && i > 0) // пропускаем первое измерение
+        {
+            sum += light2;
+            cnt++;
+        }
+    };
+
+    result.measure.light = sum / cnt * (100.0 - top) / l_max;
+
+    int l = 0;
+    gpio_pulldown_dis(PIN_LIGHT);
+
+    for (int i = 0; i < test_count; i++)
+    {
+        // ESP_ERROR_CHECK(adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &l));
+        adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &l);
+        ESP_LOGI(TAG, "%2d Light0: %d mV", i, l);
+        // vTaskDelay(1);
+    }
+
+    vTaskDelay(pulldown_switch_time);
+
+    sum = 0;
+    cnt = 0;
+    for (int i = 0; i < reads; i++)
+    {
+        esp_err_t e = adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &l);
+        if (e == ESP_OK && i > 0) // пропускаем первое измерение
+        {
+            sum += l;
+            cnt++;
+        }
+    };
+
+    result.measure.light += sum / cnt * top / l_max;
+
+    ESP_LOGI(TAG, "Light: %.1f%% (%d / %d mV, max: %d mV)", result.measure.light, l, light2, l_max);
 }
 
 void dio_init()
@@ -430,19 +501,11 @@ void dio_init()
 
     ESP_ERROR_CHECK(gpio_isr_handler_add(PIN_INT_ACC, gpio_isr_handler, (void *)PIN_INT_ACC));
 
-    cont_prepare();
-    cont_measure1(true);
+    water_cont_prepare();
+    water_cont_measure(true);
 
-    oneshot_adc_init();
-
-    int l = 0;
-    int l_max = 0;
-    ESP_ERROR_CHECK(adc_oneshot_get_calibrated_result(l_adc_handle, l_cal_handle, PIN_LIGHT, &l));
-    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(l_cal_handle, 4095, &l_max));
-
-    result.measure.light = l * 100.0 / l_max;
-
-    ESP_LOGI(TAG, "Light: %.1f%% (%d mV)", result.measure.light, l);
+    light_adc_init();
+    light_measure(0);
 
     // Water3 - без подтяжек
     io_conf.intr_type = GPIO_INTR_DISABLE;
@@ -487,7 +550,7 @@ void dio_init()
 
     vTaskDelay(1);
 
-    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '!' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '!' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
+    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
 }
 
 int get_charge()
@@ -502,30 +565,30 @@ int get_charge()
     }
 };
 
-uint64_t dio_sleep()
+uint64_t dio_sleep(uint64_t wake_stop_mask)
 {
-    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '!' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '!' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
+    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
 
     uint64_t wake_mask = 0;
-    if (gpio_get_level(PIN_LIGHT) == 0)
+    if (gpio_get_level(PIN_LIGHT) == 0 && (wake_stop_mask & BIT64(PIN_LIGHT)) == 0)
     {
         wake_mask |= BIT64(PIN_LIGHT);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_LIGHT));
     }
 
-    if (gpio_get_level(PIN_WATER3) == 0)
+    if (gpio_get_level(PIN_WATER3) == 0 && (wake_stop_mask & BIT64(PIN_WATER3)) == 0)
     {
         wake_mask |= BIT64(PIN_WATER3);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER3));
     }
 
-    if (gpio_get_level(PIN_BATT) == 0)
+    if (gpio_get_level(PIN_BATT) == 0 && (wake_stop_mask & BIT64(PIN_BATT)) == 0)
     {
         wake_mask |= BIT64(PIN_BATT);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
     }
 
-    if (gpio_get_level(PIN_INT_ACC) == 0)
+    if (gpio_get_level(PIN_INT_ACC) == 0  && (wake_stop_mask & BIT64(PIN_INT_ACC)) == 0)
     {
         wake_mask |= BIT64(PIN_INT_ACC);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
@@ -697,7 +760,8 @@ void btn_task(void *arg)
 
                 xTaskNotifyGive(xTaskDallas);
                 xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
-                cont_measure1(false);
+                water_cont_measure(false);
+                light_measure(10);
 
                 xTaskNotifyGive(xHandleWifi); // включаем WiFi;
             };

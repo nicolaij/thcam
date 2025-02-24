@@ -29,7 +29,7 @@ void BME280_delay_msek(u32 msek);
 
 bool check_range(int x, int y, int z, int setx, int sety, int setz)
 {
-    int devi = 1000 * get_menu_id("deviation") / 100; //% от 1g
+    int devi = get_menu_val_by_id("deviation");
     if ((setx + devi) > x && (setx - devi) < x && (sety + devi) > y && (sety - devi) < y && (setz + devi) > z && (setz - devi) < z)
     {
         return true;
@@ -175,9 +175,9 @@ void i2c_task(void *arg)
         uint32_t ulNotifiedValue;
 
         /* Ожидание оповещения. */
-        BaseType_t xResult = xTaskNotifyWait(pdFALSE,                                                                   /* Не очищать биты на входе. */
-                                             ULONG_MAX & ~(NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
-                                             &ulNotifiedValue,                                                          /* Сохраняет значение оповещения. */
+        BaseType_t xResult = xTaskNotifyWait(pdFALSE,                                                                                 /* Не очищать биты на входе. */
+                                             ULONG_MAX & ~(NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT | NOTYFY_TEST), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
+                                             &ulNotifiedValue,                                                                        /* Сохраняет значение оповещения. */
                                              tm);
 
         if ((ulNotifiedValue & NOTYFY_SENSOR_TH) && result.measure.d_thsensor_error == false)
@@ -276,6 +276,11 @@ void i2c_task(void *arg)
             xTaskNotify(xTaskGetCurrentTaskHandle(), 0, eSetValueWithOverwrite);
         };
 
+        if (ulNotifiedValue & NOTYFY_TEST)
+        {
+            light_measure(10);
+        }
+
         if (result.measure.d_mag_sensor_error)
             continue;
 
@@ -290,13 +295,13 @@ void i2c_task(void *arg)
 
             ESP_LOGD("LSM303", "INT1 src=%02x; CLICK src=%02x; ACC=%4d;%4d;%4d", int1, click, (ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2);
 
-            if (get_menu_id("openacce"))
+            if (get_menu_val_by_id("openacce"))
             {
-                result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("openaccX"), get_menu_id("openaccY"), get_menu_id("openaccZ"));
+                result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"));
             }
-            if (get_menu_id("closeacce"))
+            if (get_menu_val_by_id("closeacce"))
             {
-                result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("closeaccX"), get_menu_id("closeaccY"), get_menu_id("closeaccZ"));
+                result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"));
             }
 
             // xTaskNotify(xTaskGetCurrentTaskHandle(), 0, eSetValueWithOverwrite);
@@ -379,21 +384,21 @@ void i2c_task(void *arg)
 
                 ESP_LOGI("LSM303", "acc=%2.1f %2.1f %2.1f; mag=%3.1f %3.1f %3.1f", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2]);
 
-                if (get_menu_id("openacce"))
+                if (get_menu_val_by_id("openacce"))
                 {
-                    result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("openaccX"), get_menu_id("openaccY"), get_menu_id("openaccZ"));
+                    result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"));
                 }
-                if (get_menu_id("openmage"))
+                if (get_menu_val_by_id("openmage"))
                 {
-                    result.measure.open = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_id("openmagX"), get_menu_id("openmagY"), get_menu_id("openmagZ"));
+                    result.measure.open = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_val_by_id("openmagX"), get_menu_val_by_id("openmagY"), get_menu_val_by_id("openmagZ"));
                 }
-                if (get_menu_id("closeacce"))
+                if (get_menu_val_by_id("closeacce"))
                 {
-                    result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_id("closeaccX"), get_menu_id("closeaccY"), get_menu_id("closeaccZ"));
+                    result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"));
                 }
-                if (get_menu_id("closemage"))
+                if (get_menu_val_by_id("closemage"))
                 {
-                    result.measure.close = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_id("closemagX"), get_menu_id("closemagY"), get_menu_id("closemagZ"));
+                    result.measure.close = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_val_by_id("closemagX"), get_menu_val_by_id("closemagY"), get_menu_val_by_id("closemagZ"));
                 }
 
                 xEventGroupSetBits(status_event_group, READ_MAG_SENSOR);
@@ -449,6 +454,7 @@ void i2c_task(void *arg)
 
             xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_MAGACC_GET_INT, eSetBits);
         };
+
     }
 }
 

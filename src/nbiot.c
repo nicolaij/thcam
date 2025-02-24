@@ -379,11 +379,14 @@ void modem_task(void *arg)
                 }
                 else
                 {
-                    // Зарядка окончена
-                    if (cbc[1] >= get_menu_id("ubatt"))
+                    result.measure.d_nbiot_error = false;
+                    
+                    // Зарядка окончена. Передаем информацию
+                    if (result.measure.nbbattery > 3.5)
                     {
                         ESP_LOGI(TAG, "Charge complete");
                         xEventGroupSetBits(status_event_group, CHARGE_COMPLETE);
+                        break;
                     };
                 };
 
@@ -651,8 +654,8 @@ void modem_task(void *arg)
 
             int socket = 0;
 
-            int port = get_menu_id("tcpport");
-            int udpport = get_menu_id("udpport");
+            int port = get_menu_val_by_id("tcpport");
+            int udpport = get_menu_val_by_id("udpport");
 
             int protocol = 1; // TCP = 1, UDP =2
 
@@ -684,7 +687,7 @@ void modem_task(void *arg)
 
                 ESP_LOGI(TAG, "Socket %i connect...", socket);
 
-                int ip = get_menu_id("ip");
+                int ip = get_menu_val_by_id("ip");
 
                 try_counter = 3;
                 while (try_counter)
@@ -709,7 +712,7 @@ void modem_task(void *arg)
                     {
                         // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
                         // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
-                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
                         ESP_LOGI(TAG, "Send...");
 

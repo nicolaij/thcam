@@ -47,6 +47,7 @@
 #define NOTYFY_SENSOR_SET_MAGACC_INT BIT7
 #define NOTYFY_SENSOR_MAGACC_GET_INT BIT8
 #define NOTYFY_SENSOR_SET_MAGACC BIT9
+#define NOTYFY_TEST BIT10
 
 extern EventGroupHandle_t status_event_group;
 
@@ -63,13 +64,14 @@ void i2c_task(void *arg);
 
 esp_err_t read_nvs_menu();
 esp_err_t init_nvs();
-int get_menu_id(const char *id);
-esp_err_t set_menu_id(const char *id, int value);
+int get_menu_val_by_id(const char *id);
+esp_err_t set_menu_val_by_id(const char *id, int value);
 int get_menu_json(char *buf);
 int get_menu_html(char *buf);
+void light_measure(int test_count);
 
 void dio_init();
-uint64_t dio_sleep();
+uint64_t dio_sleep(uint64_t wake_stop_mask);
 int get_charge();
 
 void nbiot_power_pin(const TickType_t xTicksToDelay);
@@ -161,14 +163,16 @@ typedef struct
 extern result_data_t result;
 extern result_data_t old_result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Acc\":[%.1f,%.1f,%.1f],\"Mag\":[%.1f,%.1f,%.1f],\"Flags\":\"0x%04X\"}"
-#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2], prefix.flags
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"Flags\":\"0x%04X\"}"
+#define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2], prefix.flags
+#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, OUT_MEASURE_ACC_VARS(prefix)
 #define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, WaterTemp, Temp, Humidity, AccX, AccY, AccZ, MagX, MagY, MagZ, Flags"
-#define OUT_MEASURE_FORMATS "%2.0f, %.3f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f, 0x%04X"
+#define OUT_MEASURE_ACC_FORMATS "%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, 0x%04X"
+#define OUT_MEASURE_FORMATS "%2.0f, %.3f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, "OUT_MEASURE_ACC_FORMATS
 
 #define HISTORY_SIZE 100
 extern measure_data_t history[HISTORY_SIZE];
-extern RTC_DATA_ATTR int history_pos;
+extern int history_pos;
 
 extern int bootCount;
 extern int wait_max_counter;

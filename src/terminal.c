@@ -24,31 +24,31 @@ menu_t menu[] = {
     {.id = "id", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
     {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 10, .max = 100000},
     {.id = "waitnb", .name = "Ожидание NB-IoT, WiFi", .izm = "мин", .val = 3, .min = 1, .max = 60},
-    {.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
+    //{.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
     {.id = "ip", .name = "IP сервера", .izm = "", .val = ((10 << 24) | (179 << 16) | (40 << 8) | (20)), .min = INT32_MIN, .max = INT32_MAX},
     {.id = "tcpport", .name = "TCP порт сервера (0: не исп.)", .izm = "", .val = 48885, .min = 0, .max = 65535},
     {.id = "udpport", .name = "UDP порт сервера (0: не исп.)", .izm = "", .val = 0, .min = 0, .max = 65535},
-    {.id = "filesize", .name = "Макс. размер файла /data.csv", .izm = "кБ", .val = 128, .min = 0, .max = 200},
-    {.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
-    {.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
-    {.id = "uadc", .name = "Опорное напряжение", .izm = "мВ", .val = 2851, .min = 1, .max = 4000},
-    {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 11
+    {.id = "filesize", .name = "Макс. размер файла /data.csv", .izm = "кБ", .val = 64, .min = 0, .max = 200},
+    //{.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
+    //{.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
+    {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
     {.id = "openaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openacce", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "closeaccX", .name = "ACC Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 15
+    {.id = "closeaccX", .name = "ACC Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
     {.id = "closeaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closeaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closeacce", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "openmagX", .name = "MAG Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 19
+    {.id = "openmagX", .name = "MAG Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
     {.id = "openmagY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openmagZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openmage", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "closemagX", .name = "MAG Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, // 23
+    {.id = "closemagX", .name = "MAG Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
     {.id = "closemagY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closemagZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closemage", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "deviation", .name = "Допустимое отклонение +-", .izm = "%", .val = 50, .min = 0, .max = 100}, // 27
+    {.id = "deviation", .name = "Допустимое отклонение +-", .izm = "", .val = 500, .min = 0, .max = 1000}, 
+    {.id = "lightrang", .name = "Переключение диапазона освещен.", .izm = "%", .val = 50, .min = 0, .max = 100},
     //{.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
 
@@ -132,7 +132,18 @@ esp_err_t read_nvs_id(const char *key, uint64_t *out_value)
     return err;
 }
 
-int get_menu_id(const char *id)
+int get_menu_pos_by_id(const char *id)
+{
+    for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+    {
+        int l = strlen(menu[i].id);
+        if (strncmp(id, menu[i].id, l) == 0)
+            return i;
+    }
+    return -1;
+}
+
+int get_menu_val_by_id(const char *id)
 {
     for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
     {
@@ -143,7 +154,7 @@ int get_menu_id(const char *id)
     return 0;
 }
 
-esp_err_t set_menu_id(const char *id, int value)
+esp_err_t set_menu_val_by_id(const char *id, int value)
 {
     esp_err_t err = ESP_OK;
 
@@ -198,7 +209,8 @@ int get_menu_html(char *buf)
     {
         if (strlen(menu[i].name) > 0)
         {
-            if (i == 11 || i == 15 || i == 19 || i == 23) // XYZ
+            //if (i == 11 || i == 15 || i == 19 || i == 23) // XYZ
+            if (strnstr(menu[i].id, "accX", sizeof(menu[0].id)) > menu[i].id || strnstr(menu[i].id, "magX", sizeof(menu[0].id)) > menu[i].id)
             {
                 char e[8] = {0};
                 if (menu[i + 3].val)
@@ -378,12 +390,13 @@ void console_task(void *arg)
                         wait_max_counter = 3;
                         enter_value = 0;
                     }
-                    else if (n == sizeof(menu) / sizeof(menu_t) + 4) // test MAG/ACC
+                    else if (n == sizeof(menu) / sizeof(menu_t) + 4) // test
                     {
-                        xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT | NOTYFY_SENSOR_MAGACC_CONT, eSetValueWithOverwrite);
+                        xTaskNotify(xTaskI2C, NOTYFY_TEST, eSetValueWithOverwrite);
                         // заканчиваем работу NBIoT
                         xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
                         // nbiot_power_off();
+                        light_measure(10);
                         wait_max_counter = 3;
                         enter_value = 0;
                     }
@@ -399,7 +412,7 @@ void console_task(void *arg)
                         struct tm *localtm = localtime(&result.ttime);
                         strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
-                        ESP_LOGI("result", OUT_JSON, get_menu_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+                        ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
                         // get_menu_json(printbuf);
                         // ESP_LOGI("result", "%s", printbuf);
 
@@ -414,8 +427,8 @@ void console_task(void *arg)
                         }
                         ESP_LOGI("menu", "%2i. История: %i", ++i, bootCount);
                         ESP_LOGI("menu", "%2i. AT терминал NBIoT", ++i);
-                        ESP_LOGI("menu", "%2i. Непреравный опрос Mag/Acc", ++i);
-                        ESP_LOGI("menu", "%2i. Проверка Mag/Acc", ++i);
+                        ESP_LOGI("menu", "%2i. Непрерывный опрос Mag/Acc", ++i);
+                        ESP_LOGI("menu", "%2i. Непрерывный опрос Light", ++i);
                         ESP_LOGI("menu", "%2i. WiFi On", ++i);
                         ESP_LOGI("menu", "-------------------------------------------");
                         enter_value = 0;

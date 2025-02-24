@@ -137,13 +137,13 @@
           <th>V</th>
         </tr>
         <tr>
-          <th style="width: 30%">ACC:</th>
+          <th style="width: 30%">ACC(g):</th>
           <td>
             <div id="accx" class="sc-gauge">
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">-2</span>
               <span class="sc-max">2</span>
@@ -154,7 +154,7 @@
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">-2</span>
               <span class="sc-max">2</span>
@@ -165,7 +165,7 @@
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">-2</span>
               <span class="sc-max">2</span>
@@ -176,7 +176,7 @@
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">0</span>
               <span class="sc-max">4</span>
@@ -184,13 +184,13 @@
           </td>
         </tr>
         <tr>
-          <th style="width: 30%">MAG:</th>
+          <th style="width: 30%">MAG(Gs):</th>
           <td>
             <div id="magx" class="sc-gauge">
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">-2</span>
               <span class="sc-max">2</span>
@@ -201,7 +201,7 @@
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">-2</span>
               <span class="sc-max">2</span>
@@ -212,7 +212,7 @@
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">-2</span>
               <span class="sc-max">2</span>
@@ -223,7 +223,7 @@
               <div class="sc-background">
                 <div class="sc-percentage"></div>
                 <div class="sc-mask"></div>
-                <span class="sc-value">0.0</span>
+                <span class="sc-value">0.00</span>
               </div>
               <span class="sc-min">0</span>
               <span class="sc-max">4</span>
@@ -282,7 +282,7 @@
 
       function gauge_value(x, val) {
         const parentDOM = document.getElementById(val);
-        parentDOM.getElementsByClassName("sc-value")[0].innerHTML = x.toFixed(1);
+        parentDOM.getElementsByClassName("sc-value")[0].innerHTML = x.toFixed(2);
         if (val == "accv" || val == "magv") {
           if (x > 4) {
             x = 4;
@@ -325,10 +325,10 @@
 
       socket.onmessage = function (e) {
         //console.log(e);
-        res = e.data.split(";");
-        acc = res[0].split(" ");
-        mag = res[1].split(" ");
-        flags = Number(res[2]);
+        res = e.data.split(",");
+        acc = [res[0], res[1], res[2]];//res[0].split(" ");
+        mag = [res[3], res[4], res[5]];//mag = res[1].split(" ");
+        flags = Number(res[6]);
 
         gauge_value(Number(acc[0]), "accx");
         gauge_value(Number(acc[1]), "accy");
@@ -355,27 +355,6 @@
         xhttp.onreadystatechange = function () {
           if (this.readyState == 4 && this.status == 200) {
             document.getElementById("settingscontent").innerHTML = this.response;
-            position = this.response.search('"Acc":');
-            s = this.response.substr(position + 7, 16);
-            end = s.search("]");
-            acc = s.substring(0, end).split(",");
-
-            position = this.response.search('"Mag":');
-            s = this.response.substr(position + 7, 16);
-            end = s.search("]");
-            mag = s.substring(0, end).split(",");
-
-            gauge_value(Number(acc[0]), "accx");
-            gauge_value(Number(acc[1]), "accy");
-            gauge_value(Number(acc[2]), "accz");
-            gauge_value(Math.sqrt(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]), "accv");
-
-            calculateAngles(Number(acc[0]), Number(acc[1]), Number(acc[2]));
-
-            gauge_value(Number(mag[0]), "magx");
-            gauge_value(Number(mag[1]), "magy");
-            gauge_value(Number(mag[2]), "magz");
-            gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
 
             if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
             if (document.getElementById("enableclosemagX").innerHTML) use = "mag";

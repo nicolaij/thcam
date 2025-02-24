@@ -11,16 +11,16 @@
 
 #include "freertos/ringbuf.h"
 
-RTC_DATA_ATTR int bootCount = 0;
 
 uint8_t mac[6];
 
 result_data_t result;
 
+RTC_DATA_ATTR int bootCount = 0;
+RTC_DATA_ATTR int history_pos = 0;
 RTC_DATA_ATTR result_data_t old_result;
 
 RTC_DATA_ATTR measure_data_t history[HISTORY_SIZE];
-RTC_DATA_ATTR int history_pos = 0;
 
 EventGroupHandle_t status_event_group;
 
@@ -191,10 +191,7 @@ void app_main(void)
 
     EventBits_t uxBits;
 
-    int wait = get_menu_id("waitnb");
-
-    // время сна в мин
-    int sleeptime = get_menu_id("time");
+    int wait = get_menu_val_by_id("waitnb");
 
     const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE;
     uxBits = xEventGroupWaitBits(
@@ -239,7 +236,7 @@ void app_main(void)
     FILE *fd = NULL;
     struct stat file_stat = {.st_size = 0};
 
-    int maxfilesize = get_menu_id("filesize");
+    int maxfilesize = get_menu_val_by_id("filesize");
     // Сохраняем файл
     if (maxfilesize > 0)
     {
@@ -281,7 +278,10 @@ void app_main(void)
     };
 
     // Light, Water
-    uint64_t wake_mask = dio_sleep();
+    uint64_t wake_mask = dio_sleep(0);
+
+    // время сна в мин
+    int sleeptime = get_menu_val_by_id("time");
 
     // если затопление или засвет - сон 15 мин.
     if ((wake_mask & BIT64(PIN_WATER2)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
@@ -290,9 +290,20 @@ void app_main(void)
             sleeptime = 15;
     };
 
+    if (result.measure.nbbattery < 3.0)
+    {
+        sleeptime = get_menu_val_by_id("time") * 10;
+    }
+
+    if (result.measure.nbbattery < 2.8)
+    {
+        sleeptime = get_menu_val_by_id("time") * 1000;
+        dio_sleep(UINT64_MAX & ~BIT64(PIN_BATT)); //только зарядка! 
+    }
+
     //ESP_LOGI("main", "Free Heap: %u bytes", xPortGetFreeHeapSize());
 
-    ESP_LOGI("result", OUT_JSON, get_menu_id("id"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
+    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
 
     // если зарядка - сон 5 мин.
     if (xEventGroupGetBits(status_event_group) & NOW_CHARGE || get_charge() == 1)
@@ -302,7 +313,7 @@ void app_main(void)
 
     ESP_LOGW("main", "Go sleep: %lld min", time_in_us / 60ULL / 1000000ULL);
 
-    ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, 0xffff));
+    //ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, 0xffff));
 
     fflush(stdout);
 

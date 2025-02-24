@@ -155,7 +155,7 @@ void wifi_init_softap()
 
     static char wifi_name[sizeof(wifi_config.ap.ssid)] = AP_WIFI_SSID;
     int l = strlen(wifi_name);
-    itoa(get_menu_id("id"), &wifi_name[l], 10);
+    itoa(get_menu_val_by_id("id"), &wifi_name[l], 10);
 
     strlcpy((char *)wifi_config.ap.ssid, wifi_name, sizeof(wifi_config.ap.ssid));
     wifi_config.ap.ssid_len = strlen(wifi_name);
@@ -311,23 +311,23 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     struct tm *localtm = localtime(&result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
     localtm = localtime(&old_result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>PREVIOUS DATA = ");
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_id("id"), old_result.measure.bootcount, datetime, OUT_MEASURE_VARS(old_result.measure));
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_val_by_id("id"), old_result.measure.bootcount, datetime, OUT_MEASURE_VARS(old_result.measure));
 
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>STATUS = ");
 
     if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
     {
-        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>charge... <b>");
+        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>charge... </b>");
     }
 
     if (xEventGroupGetBits(status_event_group) & CHARGE_COMPLETE)
     {
-        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>Charge complete <b>");
+        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>Charge complete </b>");
     }
 
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", NB-IoT: <b>%s</b> ", net_status_current);
@@ -384,37 +384,16 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
 
     char *s = buf;
     char name[16];
-    while (s)
+    while (s && s < (buf + req->content_len))
     {
         char *e = strchr(s, '=');
         *e = '\0';
         strncpy(name, s, sizeof(name));
 
         int v = atoi(e + 1);
+        // ESP_LOGD("menu_post_handler", "Name  \"%s\" : \"%i\"", name, v);
+        set_menu_val_by_id(name, v);
 
-        ESP_LOGD("menu_post_handler", "Name  \"%s\" : \"%i\"", name, v);
-
-        set_menu_id(name, v);
-
-        /*
-                if (strncmp((const char *)(name), "openaccX", 8) == 0 || strncmp((const char *)(name), "openmagX", 8) == 0 || strncmp((const char *)(name), "closeaccX", 9) == 0 || strncmp((const char *)(name), "closemagX", 9) == 0)
-                {
-                    e = strchr(e + 1, ';');
-                    v = atoi(e + 1);
-                    name[strlen(name) - 1] = 'Y';
-                    set_menu_id(name, v);
-
-                    e = strchr(e + 1, ';');
-                    v = atoi(e + 1);
-                    name[strlen(name) - 1] = 'Z';
-                    set_menu_id(name, v);
-
-                    e = strchr(e + 1, ';');
-                    v = atoi(e + 1);
-                    name[strlen(name) - 1] = 'e';
-                    set_menu_id(name, v);
-                }
-        */
         s = strchr(e + 1, '&');
         if (s)
             s = s + 1;
@@ -611,8 +590,20 @@ struct t_async_resp_arg
     char *data;
 } async_resp_arg;
 
-/*
- */
+esp_err_t ws_send_acc_data(httpd_req_t *req)
+{
+    static httpd_ws_frame_t ws_pkt;
+    static char accbuf[48];
+    // ws_pkt.len = sprintf(accbuf, "%.2f %.2f %.2f;%.2f %.2f %.2f;0x%04X", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2], result.measure.flags);
+    ws_pkt.len = sprintf(accbuf, OUT_MEASURE_ACC_FORMATS, OUT_MEASURE_ACC_VARS(result.measure));
+    ws_pkt.payload = (uint8_t *)accbuf;
+    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+    if (req)
+        return httpd_ws_send_frame(req, &ws_pkt);
+    else
+        return httpd_ws_send_frame_async(async_resp_arg.hd, async_resp_arg.fd, &ws_pkt);
+}
+
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET)
@@ -667,8 +658,9 @@ static esp_err_t ws_handler(httpd_req_t *req)
         }
         else
         {
+            ws_send_acc_data(req);
             xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
-            async_resp_arg.fd = 0;
+            //async_resp_arg.fd = 0;
         }
 
         reset_sleep_timeout();
@@ -913,14 +905,7 @@ void wifi_task(void *arg)
 
         if ((uxBits & READ_MAG_SENSOR) && async_resp_arg.fd > 0)
         {
-            httpd_ws_frame_t ws_pkt;
-            char accbuf[48];
-            ws_pkt.len = sprintf(accbuf, "%3.1f %3.1f %3.1f;%3.1f %3.1f %3.1f;0x%04X", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2], result.measure.flags);
-            ws_pkt.payload = (uint8_t *)accbuf;
-            ws_pkt.type = HTTPD_WS_TYPE_TEXT;
-
-            esp_err_t ret = httpd_ws_send_frame_async(async_resp_arg.hd, async_resp_arg.fd, &ws_pkt);
-            if (ret != ESP_OK)
+            if (ws_send_acc_data(0) != ESP_OK)
             {
                 async_resp_arg.fd = 0;
             };
