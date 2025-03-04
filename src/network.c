@@ -28,7 +28,6 @@
 extern uint8_t mac[6];
 extern char pdp_ip[20];
 extern char net_status_current[32];
-extern RTC_DATA_ATTR result_data_t old_result;
 
 #define CLIENT_WIFI_SSID "ap1"
 #define CLIENT_WIFI_PASS "123123123"
@@ -310,15 +309,10 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     char datetime[24];
     struct tm *localtm = localtime(&result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
+    //l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
-    localtm = localtime(&old_result.ttime);
-    strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>PREVIOUS DATA = ");
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_val_by_id("id"), old_result.measure.bootcount, datetime, OUT_MEASURE_VARS(old_result.measure));
-
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>STATUS = ");
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>STATUS ");
 
     if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
     {
@@ -402,6 +396,61 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
     // End response
     return download_get_handler(req);
 }
+
+esp_err_t get_history(httpd_req_t *req)
+{
+    int l = 0;
+    reset_sleep_timeout();
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Connection", "close");
+
+    buf[0] = '\0';
+
+    int hpos = history_pos + HISTORY_SIZE;
+    int hend = history_pos;
+
+    l = snprintf(&buf[l], (CONFIG_LWIP_TCP_MSS - l), "bootcount, " OUT_MEASURE_HEADERS "\n");
+
+    while (hpos > hend)
+    {
+        int indx = hpos % HISTORY_SIZE;
+        // ESP_LOGI("menu", "%3i, " OUT_MEASURE_FORMATS, history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
+        l += snprintf(&buf[l], (CONFIG_LWIP_TCP_MSS - l), "%3i, " OUT_MEASURE_FORMATS "\n", history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
+        hpos--;
+
+        if ((CONFIG_LWIP_TCP_MSS - l) < sizeof(OUT_MEASURE_FORMATS) * 2)
+        {
+            if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+            {
+                ESP_LOGE("WWW", "History sending failed!");
+                /* Abort sending file */
+                ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_sendstr_chunk(req, NULL));
+                /* Respond with 500 Internal Server Error */
+                ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file"));
+                return ESP_FAIL;
+            }
+            l = 0;
+        }
+    }
+
+    if (l > 0)
+    {
+        if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+        {
+            ESP_LOGE("WWW", "History sending failed!");
+            /* Abort sending file */
+            ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_sendstr_chunk(req, NULL));
+            /* Respond with 500 Internal Server Error */
+            ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file"));
+            return ESP_FAIL;
+        }
+    }
+
+    /* Respond with an empty chunk to signal HTTP response completion */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_resp_send_chunk(req, NULL, 0));
+    return ESP_OK;
+};
 
 // Get measure data
 esp_err_t d_get(httpd_req_t *req)
@@ -660,7 +709,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
         {
             ws_send_acc_data(req);
             xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
-            //async_resp_arg.fd = 0;
+            // async_resp_arg.fd = 0;
         }
 
         reset_sleep_timeout();
@@ -735,13 +784,12 @@ static const httpd_uri_t data_page = {
     .user_ctx = &((down_data_t){.filepath = "/spiffs/" DATAFILE, .content = "text/csv"}),
 };
 
-/*
 static const httpd_uri_t olddata_page = {
     .uri = "/old" DATAFILE,
     .method = HTTP_GET,
     .handler = download_get_handler,
     .user_ctx = &((down_data_t){.filepath = "/spiffs/old" DATAFILE, .content = "text/csv"})};
-*/
+
 static const httpd_uri_t menu_post = {
     .uri = "/",
     .method = HTTP_POST,
@@ -766,6 +814,12 @@ static const httpd_uri_t data_csv = {
     .handler = d_get,
     .user_ctx = NULL};
 
+static const httpd_uri_t history_url = {
+    .uri = "/history",
+    .method = HTTP_GET,
+    .handler = get_history,
+    .user_ctx = NULL};
+
 static const httpd_uri_t d3 = {
     .uri = "/d3",
     .method = HTTP_GET,
@@ -777,30 +831,6 @@ static const httpd_uri_t d3_get_gz = {
     .method = HTTP_GET,
     .handler = download_get_handler,
     .user_ctx = &((down_data_t){.filepath = "/spiffs/d3.min.js.gz", .content = "application/javascript"})};
-
-static const httpd_uri_t d33d = {
-    .uri = "/d33d",
-    .method = HTTP_GET,
-    .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/d33d.html", .content = "text/html"})};
-
-static const httpd_uri_t x3dom_css = {
-    .uri = "/x3dom.css",
-    .method = HTTP_GET,
-    .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/x3dom.css", .content = "text/html"})};
-
-static const httpd_uri_t x3dom_gz = {
-    .uri = "/x3dom.js",
-    .method = HTTP_GET,
-    .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/x3dom.js.gz", .content = "application/javascript"})};
-
-static const httpd_uri_t d3_x3d_gz = {
-    .uri = "/d3-x3d.min.js",
-    .method = HTTP_GET,
-    .handler = download_get_handler,
-    .user_ctx = &((down_data_t){.filepath = "/spiffs/d3-x3d.min.js.gz", .content = "application/javascript"})};
 
 static const httpd_uri_t ws = {
     .uri = "/ws",
@@ -836,16 +866,13 @@ static httpd_handle_t start_webserver(void)
         httpd_register_uri_handler(server, &update_get);
 
         httpd_register_uri_handler(server, &data_page);
-        // httpd_register_uri_handler(server, &olddata_page);
+        httpd_register_uri_handler(server, &olddata_page);
+
+        httpd_register_uri_handler(server, &history_url);
 
         httpd_register_uri_handler(server, &data_csv);
         httpd_register_uri_handler(server, &d3);
         httpd_register_uri_handler(server, &d3_get_gz);
-
-        httpd_register_uri_handler(server, &d33d);
-        httpd_register_uri_handler(server, &x3dom_css);
-        httpd_register_uri_handler(server, &x3dom_gz);
-        httpd_register_uri_handler(server, &d3_x3d_gz);
 
         httpd_register_uri_handler(server, &ws);
 

@@ -27,9 +27,8 @@ void BME280_delay_msek(u32 msek);
 
 #include "LSM303DLHC.h"
 
-bool check_range(int x, int y, int z, int setx, int sety, int setz)
+bool check_range(int x, int y, int z, int setx, int sety, int setz, int devi)
 {
-    int devi = get_menu_val_by_id("deviation");
     if ((setx + devi) > x && (setx - devi) < x && (sety + devi) > y && (sety - devi) < y && (setz + devi) > z && (setz - devi) < z)
     {
         return true;
@@ -56,6 +55,13 @@ float get_temperature_sensor()
     ESP_LOGI("temperature_sensor", "Internal temperature:  %.01f°C", internal_temp);
     return internal_temp;
 };
+
+int compare_function(const void *a, const void *b)
+{
+    int *x = (int *)a;
+    int *y = (int *)b;
+    return *x - *y;
+}
 
 void i2c_task(void *arg)
 {
@@ -293,16 +299,16 @@ void i2c_task(void *arg)
             int16_t ax, ay, az;
             LSM303DLHC_getAcceleration(&ax, &ay, &az);
 
-            ESP_LOGD("LSM303", "INT1 src=%02x; CLICK src=%02x; ACC=%4d;%4d;%4d", int1, click, (ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2);
-
             if (get_menu_val_by_id("openacce"))
             {
-                result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"));
+                result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"), get_menu_val_by_id("deviation"));
             }
             if (get_menu_val_by_id("closeacce"))
             {
-                result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"));
+                result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"), get_menu_val_by_id("deviation"));
             }
+
+            ESP_LOGD("LSM303", "INT1 src=%02x; CLICK src=%02x; ACC=%4d;%4d;%4d", int1, click, (ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2);
 
             // xTaskNotify(xTaskGetCurrentTaskHandle(), 0, eSetValueWithOverwrite);
         }
@@ -386,19 +392,19 @@ void i2c_task(void *arg)
 
                 if (get_menu_val_by_id("openacce"))
                 {
-                    result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"));
+                    result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"), get_menu_val_by_id("deviation"));
                 }
                 if (get_menu_val_by_id("openmage"))
                 {
-                    result.measure.open = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_val_by_id("openmagX"), get_menu_val_by_id("openmagY"), get_menu_val_by_id("openmagZ"));
+                    result.measure.open = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_val_by_id("openmagX"), get_menu_val_by_id("openmagY"), get_menu_val_by_id("openmagZ"), get_menu_val_by_id("deviation"));
                 }
                 if (get_menu_val_by_id("closeacce"))
                 {
-                    result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"));
+                    result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"), get_menu_val_by_id("deviation"));
                 }
                 if (get_menu_val_by_id("closemage"))
                 {
-                    result.measure.close = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_val_by_id("closemagX"), get_menu_val_by_id("closemagY"), get_menu_val_by_id("closemagZ"));
+                    result.measure.close = check_range(mx * 1000 / 670, my * 1000 / 670, mz * 1000 / 600, get_menu_val_by_id("closemagX"), get_menu_val_by_id("closemagY"), get_menu_val_by_id("closemagZ"), get_menu_val_by_id("deviation"));
                 }
 
                 xEventGroupSetBits(status_event_group, READ_MAG_SENSOR);
@@ -417,26 +423,43 @@ void i2c_task(void *arg)
 
             int16_t ax, ay, az;
             LSM303DLHC_getAcceleration(&ax, &ay, &az);
-            ESP_LOGD("LSM303", "ACC=%4d;%4d;%4d", (ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2);
+            int x = (ax >> 4) * 2;
+            int y = (ay >> 4) * 2;
+            int z = (az >> 4) * 2;
+            ESP_LOGD("LSM303", "ACC=%4d;%4d;%4d", x, y, z);
+
+            int data[] = {abs(x), abs(y), abs(z)};
+            qsort(data, 3, sizeof(int), compare_function);
+
+            //ESP_LOGD("LSM303", "sort=%d %d %d", data[0], data[1], data[2]);
+
+            // берем больший промежуток
+            int avg = 0;
+            if ((data[2] - data[1]) > (data[1] - data[0]))
+                avg = (data[2] + data[1]) / 2;
+            else
+                avg = (data[1] + data[0]) / 2;
+
+            //ESP_LOGD("LSM303", "avg ACC=%d", avg);
 
             uint8_t int_mask = BIT(LSM303DLHC_INT1_XLIE_XDOWNE_BIT) | BIT(LSM303DLHC_INT1_XHIE_XUPE_BIT) | BIT(LSM303DLHC_INT1_YLIE_YDOWNE_BIT) | BIT(LSM303DLHC_INT1_YHIE_YUPE_BIT) | BIT(LSM303DLHC_INT1_ZLIE_ZDOWNE_BIT) | BIT(LSM303DLHC_INT1_ZHIE_ZUPE_BIT);
 
-            if ((ax >> 4) * 2 > 500)
+            if (x > avg)
                 int_mask &= ~BIT(LSM303DLHC_INT1_XHIE_XUPE_BIT);
-            if ((ax >> 4) * 2 < -500)
+            if (x < (avg * -1))
                 int_mask &= ~BIT(LSM303DLHC_INT1_XLIE_XDOWNE_BIT);
-            if ((ay >> 4) * 2 > 500)
+            if (y > avg)
                 int_mask &= ~BIT(LSM303DLHC_INT1_YHIE_YUPE_BIT);
-            if ((ay >> 4) * 2 < -500)
+            if (y < (avg * -1))
                 int_mask &= ~BIT(LSM303DLHC_INT1_YLIE_YDOWNE_BIT);
-            if ((az >> 4) * 2 > 500)
+            if (z > avg)
                 int_mask &= ~BIT(LSM303DLHC_INT1_ZHIE_ZUPE_BIT);
-            if ((az >> 4) * 2 < -500)
+            if (z < (avg * -1))
                 int_mask &= ~BIT(LSM303DLHC_INT1_ZLIE_ZDOWNE_BIT);
 
             // setup INT1 (all axis)
             writeByte(LSM303DLHC_DEFAULT_ADDRESS_A, LSM303DLHC_RA_INT1_CFG_A, int_mask | BIT(LSM303DLHC_INT1_6D_BIT));
-            LSM303DLHC_setAccelInterrupt1Threshold(128 / 8); //(set 0.5g) 1 LSB = full-scale / 128
+            LSM303DLHC_setAccelInterrupt1Threshold(avg * 128 / (4 * 1000)); //(set 0.5g) 1 LSB = full-scale / 128
             LSM303DLHC_setAccelInterrupt1Duration(1);
 
             // writeByte(LSM303DLHC_DEFAULT_ADDRESS_A, LSM303DLHC_RA_CLICK_SRC_A, 0b01101100); // Double-click enable,  negative detection, Z
@@ -454,7 +477,6 @@ void i2c_task(void *arg)
 
             xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_MAGACC_GET_INT, eSetBits);
         };
-
     }
 }
 

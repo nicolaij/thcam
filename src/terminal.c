@@ -31,23 +31,23 @@ menu_t menu[] = {
     {.id = "filesize", .name = "Макс. размер файла /data.csv", .izm = "кБ", .val = 64, .min = 0, .max = 200},
     //{.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
     //{.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
-    {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
+    {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openacce", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "closeaccX", .name = "ACC Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
+    {.id = "closeaccX", .name = "ACC Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closeaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closeaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closeacce", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "openmagX", .name = "MAG Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
+    {.id = "openmagX", .name = "MAG Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openmagY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openmagZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openmage", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "closemagX", .name = "MAG Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999}, 
+    {.id = "closemagX", .name = "MAG Положение Закрыто", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closemagY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closemagZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "closemage", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
-    {.id = "deviation", .name = "Допустимое отклонение +-", .izm = "", .val = 500, .min = 0, .max = 1000}, 
+    {.id = "deviation", .name = "Допустимое отклонение +-", .izm = "", .val = 500, .min = 0, .max = 1000},
     {.id = "lightrang", .name = "Переключение диапазона освещен.", .izm = "%", .val = 50, .min = 0, .max = 100},
     //{.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
@@ -209,7 +209,7 @@ int get_menu_html(char *buf)
     {
         if (strlen(menu[i].name) > 0)
         {
-            //if (i == 11 || i == 15 || i == 19 || i == 23) // XYZ
+            // if (i == 11 || i == 15 || i == 19 || i == 23) // XYZ
             if (strnstr(menu[i].id, "accX", sizeof(menu[0].id)) > menu[i].id || strnstr(menu[i].id, "magX", sizeof(menu[0].id)) > menu[i].id)
             {
                 char e[8] = {0};
@@ -282,6 +282,10 @@ void console_task(void *arg)
                 uart_write_bytes(UART_NUM_1, data, rxBytes);
                 // ESP_LOGE(TAG, "%c(%02x)", *data, *data);
                 // print_atcmd("ATI", (char*)data);
+                if (data[rxBytes - 1] == '\n')
+                {
+                    xEventGroupSetBits(status_event_group, SERIAL_TERMINAL_ACTIVE);
+                }
             }
 
             while (uart_read_bytes(UART_NUM_1, data, 1, 50 / portTICK_PERIOD_MS) > 0)

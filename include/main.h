@@ -31,8 +31,8 @@
 #define CHARGE_COMPLETE BIT7
 #define SERIAL_TERMINAL_ACTIVE BIT8
 #define NB_TERMINAL BIT9
-#define END_DS_SENSOR BIT10
-#define END_TH_SENSOR BIT11
+//#define END_DS_SENSOR BIT10
+//#define END_TH_SENSOR BIT11
 #define READ_MAG_SENSOR BIT12
 
 #define ONEWIRE_MAX_DS18B20 1
@@ -70,8 +70,8 @@ int get_menu_json(char *buf);
 int get_menu_html(char *buf);
 void light_measure(int test_count);
 
-void dio_init();
-uint64_t dio_sleep(uint64_t wake_stop_mask);
+uint64_t dio_init();
+uint64_t dio_sleep(uint64_t wake_mask);
 int get_charge();
 
 void nbiot_power_pin(const TickType_t xTicksToDelay);
@@ -82,6 +82,8 @@ esp_err_t print_atcmd(const char *cmd, char *buffer);
 int getResult_Data(char *line, int data_pos);
 
 esp_err_t read_nvs_id(const char *key, uint64_t *out_value);
+
+bool check_range(int x, int y, int z, int setx, int sety, int setz, int devi);
 
 float get_temperature_sensor();
 
@@ -161,7 +163,6 @@ typedef struct
 } result_data_t;
 
 extern result_data_t result;
-extern result_data_t old_result;
 
 #define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"Flags\":\"0x%04X\"}"
 #define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2], prefix.flags

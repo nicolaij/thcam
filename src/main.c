@@ -11,14 +11,12 @@
 
 #include "freertos/ringbuf.h"
 
-
 uint8_t mac[6];
 
 result_data_t result;
 
 RTC_DATA_ATTR int bootCount = 0;
 RTC_DATA_ATTR int history_pos = 0;
-RTC_DATA_ATTR result_data_t old_result;
 
 RTC_DATA_ATTR measure_data_t history[HISTORY_SIZE];
 
@@ -124,7 +122,7 @@ void app_main(void)
     // xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
 
     // Light, Water
-    dio_init();
+    uint64_t wake_mask = dio_init() | (BIT64(PIN_BATT) | BIT64(PIN_INT_ACC));
 
     time_t n = time(0);
     struct tm *localtm = localtime(&n);
@@ -187,18 +185,17 @@ void app_main(void)
         xEventGroupSetBits(status_event_group, NOW_CHARGE);
     }
 
-    history[history_pos] = result.measure;
-
     EventBits_t uxBits;
 
     int wait = get_menu_val_by_id("waitnb");
 
     const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE;
+
     uxBits = xEventGroupWaitBits(
-        status_event_group, /* The event group being tested. */
-        nowake | END_RADIO, /* The bits within the event group to wait for. */
-        pdFALSE,            /* BIT_0 & BIT_1 should be cleared before returning. */
-        pdFALSE,            /* ОБА */
+        status_event_group, // The event group being tested.
+        nowake | END_RADIO, // The bits within the event group to wait for.
+        pdFALSE,            // BIT_0 & BIT_1 should be cleared before returning.
+        pdFALSE,            // ОБА
         wait * 60000 / portTICK_PERIOD_MS);
 
     history[history_pos] = result.measure;
@@ -208,63 +205,70 @@ void app_main(void)
         xTaskNotifyGive(xHandleWifi); // включаем WiFi
     };
 
-    if ((uxBits & END_RADIO) == 0 && ((uxBits & (nowake)) != 0))
+    if (!((uxBits & END_RADIO) != 0 && (uxBits & (nowake)) == 0))
     {
         do // Ждем истечения таймаута
         {
             uxBits = xEventGroupWaitBits(
-                status_event_group, /* The event group being tested. */
-                nowake,             /* The bits within the event group to wait for. */
-                pdTRUE,             /* BIT_0 & BIT_1 should be cleared before returning. */
-                pdFALSE,            /* ОБА */
+                status_event_group, // The event group being tested.
+                nowake,             // The bits within the event group to wait for.
+                pdTRUE,             // BIT_0 & BIT_1 should be cleared before returning.
+                pdFALSE,            // ОБА
                 wait * 60000 / portTICK_PERIOD_MS);
+
+            history[history_pos] = result.measure;
 
         } while (((uxBits & (nowake)) != 0));
     }
 
-    // заканчиваем работу NBIoT
+    // принудительно заканчиваем работу NBIoT
     xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
 
-    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
+    // xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
+    // vTaskDelay(1);
 
-    old_result = result;
+    // old_result = result;
 
-    history[history_pos] = result.measure;
     history_pos = (history_pos + 1) % HISTORY_SIZE;
 
-    const char *filepath = "/spiffs/" DATAFILE;
-    FILE *fd = NULL;
-    struct stat file_stat = {.st_size = 0};
+    /*
+        const char *filepath = "/spiffs/" DATAFILE;
+        FILE *fd = NULL;
+        struct stat file_stat = {.st_size = 0};
 
-    int maxfilesize = get_menu_val_by_id("filesize");
-    // Сохраняем файл
-    if (maxfilesize > 0)
-    {
-        if (stat(filepath, &file_stat) == -1)
+        int maxfilesize = get_menu_val_by_id("filesize");
+        // Сохраняем файл
+        if (maxfilesize > 0)
         {
-            fd = fopen(filepath, "w");
-            fprintf(fd, "BootCounter, ttime, " OUT_MEASURE_HEADERS "\n");
+            if (stat(filepath, &file_stat) == -1)
+            {
+                fd = fopen(filepath, "w");
+                fprintf(fd, "BootCounter, ttime, " OUT_MEASURE_HEADERS "\n");
+                fclose(fd);
+            }
+
+            fd = fopen(filepath, "a+");
+            if (fd)
+            {
+                if (fprintf(fd, "%4i, %10lli, " OUT_MEASURE_FORMATS "\n", bootCount, result.ttime, OUT_MEASURE_VARS(result.measure)) > 0)
+                {
+                    fflush(fd);
+                    ESP_LOGI("main", "Save \"%s\" successful", filepath);
+                }
+                else
+                {
+                    ESP_LOGW("main", "Save \"%s\" error!", filepath);
+                }
+            }
             fclose(fd);
         }
 
-        fd = fopen(filepath, "a+");
-        if (fprintf(fd, "%4i, %10lli, " OUT_MEASURE_FORMATS "\n", bootCount, result.ttime, OUT_MEASURE_VARS(result.measure)) > 0)
+        if (maxfilesize > 0 && file_stat.st_size > (maxfilesize * 1024))
         {
-            ESP_LOGI("main", "Save \"%s\" successful", filepath);
-        }
-        else
-        {
-            ESP_LOGW("main", "Save \"%s\" error!", filepath);
-        }
-        fclose(fd);
-    }
-
-    if (maxfilesize > 0 && file_stat.st_size > (maxfilesize * 1024))
-    {
-        remove("/spiffs/old" DATAFILE);
-        rename(filepath, "/spiffs/old" DATAFILE);
-    };
-
+            remove("/spiffs/old" DATAFILE);
+            rename(filepath, "/spiffs/old" DATAFILE);
+        };
+    */
     if ((uxBits & END_RADIO) == 0)
     {
         // даем время выключиться
@@ -277,46 +281,49 @@ void app_main(void)
         nbiot_power_off();
     };
 
-    // Light, Water
-    uint64_t wake_mask = dio_sleep(0);
-
     // время сна в мин
     int sleeptime = get_menu_val_by_id("time");
 
-    // если затопление или засвет - сон 15 мин.
-    if ((wake_mask & BIT64(PIN_WATER2)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
+    // если затопление или засвет - сон короче.
+    if ((wake_mask & BIT64(PIN_WATER3)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
     {
         if (sleeptime > 15)
-            sleeptime = 15;
-    };
+            sleeptime = get_menu_val_by_id("time") / 2;
+    }
 
-    if (result.measure.nbbattery < 3.0)
+    // транспортное положение вверх ногами
+    if (check_range(result.measure.acc[0] * 1000.0, result.measure.acc[1] * 1000.0, result.measure.acc[2] * 1000.0, 0, 0, 1000, 300))
+    {
+        sleeptime = 24 * 60;                                  // сутки
+        wake_mask = ((BIT64(PIN_BATT) | BIT64(PIN_INT_ACC))); // только зарядка и положение!
+    }
+
+    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0)
     {
         sleeptime = get_menu_val_by_id("time") * 10;
     }
 
-    if (result.measure.nbbattery < 2.8)
+    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 2.8)
     {
         sleeptime = get_menu_val_by_id("time") * 1000;
-        dio_sleep(UINT64_MAX & ~BIT64(PIN_BATT)); //только зарядка! 
+        wake_mask = (BIT64(PIN_BATT)); // только зарядка!
     }
 
-    //ESP_LOGI("main", "Free Heap: %u bytes", xPortGetFreeHeapSize());
+    dio_sleep(wake_mask);
 
     ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
 
     // если зарядка - сон 5 мин.
-    if (xEventGroupGetBits(status_event_group) & NOW_CHARGE || get_charge() == 1)
+    if (result.measure.d_charge || get_charge())
         sleeptime = 5;
 
+    ESP_LOGW("main", "Go sleep: %d min", sleeptime);
+
     uint64_t time_in_us = sleeptime * 60ULL * 1000000ULL;
+    esp_sleep_enable_timer_wakeup(time_in_us);
 
-    ESP_LOGW("main", "Go sleep: %lld min", time_in_us / 60ULL / 1000000ULL);
-
-    //ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, 0xffff));
+    // ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, 0xffff));
 
     fflush(stdout);
-
-    esp_sleep_enable_timer_wakeup(time_in_us);
     esp_deep_sleep_start();
 }

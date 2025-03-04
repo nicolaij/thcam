@@ -17,7 +17,7 @@ static const char *TAG = "NBIoT";
 char pdp_ip[20];
 char net_status_current[32];
 
-RTC_DATA_ATTR bool run_once = false;
+RTC_DATA_ATTR bool run_first = false;
 
 esp_err_t print_atcmd(const char *cmd, char *buffer)
 {
@@ -196,9 +196,15 @@ esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *res
             else
                 s = strchr(s + 1, ',');
 
+            if (s == NULL)
+                return ESP_OK;
+
             ESP_LOGV(TAG, "Found string:\"%s\"", s);
 
-            resultdata[i] = atoi(s + 1);
+            if (*(s + 1) == '"') // HEX STRING (ex CREG?)
+                resultdata[i] = strtol(s + 2, NULL, 16);
+            else
+                resultdata[i] = atoi(s + 1);
         }
     }
 
@@ -380,7 +386,7 @@ void modem_task(void *arg)
                 else
                 {
                     result.measure.d_nbiot_error = false;
-                    
+
                     // Зарядка окончена. Передаем информацию
                     if (result.measure.nbbattery > 3.5)
                     {
@@ -439,22 +445,24 @@ void modem_task(void *arg)
             result.measure.d_nbiot_error = false;
             strcpy(net_status_current, "Network search...");
 
+            at_reply_wait_OK("AT+CREG=2\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+
             // Network Registration Status
             int try_network = 500;
             while (try_network > 0)
             {
-                int cgreg[2] = {-1, -1};
-                ee = at_reply_get("AT+CGREG?\r\n", "CGREG:", (char *)data, cgreg, 2, 1000 / portTICK_PERIOD_MS);
+                int creg[7] = {-1, -1};
+                ee = at_reply_get("AT+CREG?\r\n", "CREG:", (char *)data, creg, 5, 1000 / portTICK_PERIOD_MS);
                 if (ee != ESP_OK)
                 {
-                    ESP_LOGW(TAG, "AT+CGREG?");
+                    ESP_LOGW(TAG, "AT+CREG?");
                     vTaskDelay(1000 / portTICK_PERIOD_MS);
                 }
                 else
                 {
-                    if (cgreg[1] == 1) // 1 Registered, home network.
+                    if (creg[1] == 1) // 1 Registered, home network.
                     {
-                        ESP_LOGI(TAG, "Registered. Home network.");
+                        ESP_LOGI(TAG, "Registered. Home network. TAC=%u, CI=%u", creg[2], creg[3]);
                         break;
                     }
                 }
@@ -478,13 +486,13 @@ void modem_task(void *arg)
             }
 
             // Clock
-            if (run_once == false)
+            if (run_first == false)
             {
                 // AT+CURTC? AT+CTZR?
                 // ee = at_reply_wait_OK("AT+CTZR=?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                 ee = at_reply_wait_OK("AT+CURTC=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                 ee = at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                run_once = true;
+                run_first = true;
             }
             ee = at_reply_wait("AT+CCLK?\r\n", "CCLK:", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
@@ -614,27 +622,29 @@ void modem_task(void *arg)
             {
                 break;
             }
-
+            
+            int ip = get_menu_val_by_id("ip");
             /*
-                    //ping
-                    //AT+CIPPING
-                    ee = at_reply_wait_OK("AT+CIPPING=\"10.179.40.20\"\r\n", (char *)data, 60000 / portTICK_PERIOD_MS);
-                    if (ee != ESP_OK)
-                    {
-                        ESP_LOGW(TAG, "AT+CIPPING:%s", data);
-                        vTaskDelay(1000 / portTICK_PERIOD_MS);
-                    }
+                        // ping
+                        // AT+CIPPING
 
-                    vTaskDelay(5000 / portTICK_PERIOD_MS);
+                        snprintf(send_data, sizeof(send_data), "AT+CIPPING=\"%i.%i.%i.%i\"\r\n", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
+                        ee = at_reply_wait_OK(send_data, (char *)data, 60000 / portTICK_PERIOD_MS);
+                        if (ee != ESP_OK)
+                        {
+                            ESP_LOGW(TAG, "AT+CIPPING:%s", data);
+                            vTaskDelay(1000 / portTICK_PERIOD_MS);
+                        }
 
-                    ee = at_reply_wait_OK("AT+CIPPING?\r\n", (char *)data, 60000 / portTICK_PERIOD_MS);
-                    if (ee != ESP_OK)
-                    {
-                        ESP_LOGW(TAG, "AT+CIPPING?:%s", data);
-                        vTaskDelay(1000 / portTICK_PERIOD_MS);
-                    }
+                        vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+                        ee = at_reply_wait_OK("AT+CIPPING?\r\n", (char *)data, 60000 / portTICK_PERIOD_MS);
+                        if (ee != ESP_OK)
+                        {
+                            ESP_LOGW(TAG, "AT+CIPPING?:%s", data);
+                            vTaskDelay(1000 / portTICK_PERIOD_MS);
+                        }
             */
-
             // TCP Connect
             /*
             AT+CSOC=1,1,1
@@ -687,8 +697,6 @@ void modem_task(void *arg)
 
                 ESP_LOGI(TAG, "Socket %i connect...", socket);
 
-                int ip = get_menu_val_by_id("ip");
-
                 try_counter = 3;
                 while (try_counter)
                 {
@@ -697,6 +705,7 @@ void modem_task(void *arg)
                     if (ee != ESP_OK)
                     {
                         ESP_LOGW(TAG, "AT+CSOCON:%s", data);
+                        result.measure.d_nbiot_error = true;
                         /* ping
                             // AT+CIPPING
                             snprintf(send_data, sizeof(send_data), "AT+CIPPING=\"%i.%i.%i.%i\"\r\n", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);

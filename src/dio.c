@@ -341,7 +341,7 @@ void water_cont_measure(bool printdata)
 
         int batt = result.measure.nbbattery;
         if (batt == 0)
-            batt = old_result.measure.nbbattery;
+            batt = history[(history_pos - 1) % HISTORY_SIZE].nbbattery; //old_result.measure.nbbattery;
         if (batt == 0)
             batt = 3300;
 
@@ -477,7 +477,7 @@ void light_measure(int test_count)
     ESP_LOGI(TAG, "Light: %.1f%% (%d / %d mV, max: %d mV)", result.measure.light, l, light2, l_max);
 }
 
-void dio_init()
+uint64_t dio_init()
 {
     static StaticQueue_t xStaticQueue;
     xQueue = xQueueCreateStatic(QUEUE_LENGTH, ITEM_SIZE, ucQueueStorageArea, &xStaticQueue);
@@ -519,6 +519,7 @@ void dio_init()
     result.measure.d_light_mode = 0;
 
     vTaskDelay(1);
+    uint64_t wake_mask = 0;
 
     // Water - с подтяжкой
     if (gpio_get_level(PIN_WATER3) == 1)
@@ -532,6 +533,14 @@ void dio_init()
             gpio_pulldown_dis(PIN_WATER3);
             result.measure.d_wet_mode = 0;
         }
+        else
+        {
+            wake_mask |= BIT64(PIN_WATER3);
+        }
+    }
+    else
+    {
+        wake_mask |= BIT64(PIN_WATER3);
     }
 
     // Light - с подтяжкой
@@ -546,49 +555,48 @@ void dio_init()
             gpio_pulldown_dis(PIN_LIGHT);
             result.measure.d_light_mode = 0;
         }
+        else
+        {
+            wake_mask |= BIT64(PIN_LIGHT);
+        }
+    }
+    else
+    {
+        wake_mask |= BIT64(PIN_LIGHT);
     }
 
     vTaskDelay(1);
 
-    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
+    ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask && BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask && BIT64(PIN_INT_ACC)) != 0));
+    return wake_mask;
 }
 
 int get_charge()
 {
-    if (gpio_get_level(PIN_BATT))
-    {
-        return 1;
-    }
-    else
-    {
-        return 0;
-    }
+    return gpio_get_level(PIN_BATT);
 };
 
-uint64_t dio_sleep(uint64_t wake_stop_mask)
+uint64_t dio_sleep(uint64_t wake_mask)
 {
-    ESP_LOGI(TAG, "Light: %d%c; Water: %d%c; Charge: %d; INT ACC: %d", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', gpio_get_level(PIN_BATT), gpio_get_level(PIN_INT_ACC));
+    ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask && BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask && BIT64(PIN_INT_ACC)) != 0));
 
-    uint64_t wake_mask = 0;
-    if (gpio_get_level(PIN_LIGHT) == 0 && (wake_stop_mask & BIT64(PIN_LIGHT)) == 0)
+    if (wake_mask && BIT64(PIN_LIGHT))
     {
-        wake_mask |= BIT64(PIN_LIGHT);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_LIGHT));
     }
 
-    if (gpio_get_level(PIN_WATER3) == 0 && (wake_stop_mask & BIT64(PIN_WATER3)) == 0)
+    if (wake_mask && BIT64(PIN_WATER3))
     {
-        wake_mask |= BIT64(PIN_WATER3);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER3));
     }
 
-    if (gpio_get_level(PIN_BATT) == 0 && (wake_stop_mask & BIT64(PIN_BATT)) == 0)
+    if (gpio_get_level(PIN_BATT) == 0)
     {
         wake_mask |= BIT64(PIN_BATT);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
     }
 
-    if (gpio_get_level(PIN_INT_ACC) == 0  && (wake_stop_mask & BIT64(PIN_INT_ACC)) == 0)
+    if (gpio_get_level(PIN_INT_ACC) == 0)
     {
         wake_mask |= BIT64(PIN_INT_ACC);
         ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
@@ -667,7 +675,6 @@ void btn_task(void *arg)
     int debounce = 0;
 
     int output = 0;
-    int output_count = 100;
 
     const int short_count = 4;
     const int long_count = 50;
