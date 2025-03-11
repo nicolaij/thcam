@@ -218,10 +218,19 @@ void app_main(void)
 
             history[history_pos] = result.measure;
 
+            vTaskDelay(10000 / portTICK_PERIOD_MS);
+
+            // не засыпаем совсем, если на зарядке
+            if (get_charge())
+            {
+                xEventGroupSetBits(status_event_group, NOW_CHARGE);
+                continue;
+            }
+
         } while (((uxBits & (nowake)) != 0));
     }
 
-    // принудительно заканчиваем работу NBIoT
+    // принудительно заканчиваем работу NBIoT и WiFi
     xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
 
     // xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
@@ -284,11 +293,17 @@ void app_main(void)
     // время сна в мин
     int sleeptime = get_menu_val_by_id("time");
 
-    // если затопление или засвет - сон короче.
+    // если затопление или засвет - сон короче в 2 раза.
     if ((wake_mask & BIT64(PIN_WATER3)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
     {
         if (sleeptime > 15)
             sleeptime = get_menu_val_by_id("time") / 2;
+    }
+
+    // если проснулись от затопления или засвета - следующий сон 5 мин.
+    if (result.measure.d_light || result.measure.d_water)
+    {
+        sleeptime = 5;
     }
 
     // транспортное положение вверх ногами
@@ -314,8 +329,8 @@ void app_main(void)
     ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
 
     // если зарядка - сон 5 мин.
-    if (result.measure.d_charge || get_charge())
-        sleeptime = 5;
+    // if (result.measure.d_charge || get_charge())
+    //    sleeptime = 5;
 
     ESP_LOGW("main", "Go sleep: %d min", sleeptime);
 

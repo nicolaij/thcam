@@ -341,7 +341,7 @@ void water_cont_measure(bool printdata)
 
         int batt = result.measure.nbbattery;
         if (batt == 0)
-            batt = history[(history_pos - 1) % HISTORY_SIZE].nbbattery; //old_result.measure.nbbattery;
+            batt = history[(history_pos - 1) % HISTORY_SIZE].nbbattery; // old_result.measure.nbbattery;
         if (batt == 0)
             batt = 3300;
 
@@ -529,8 +529,10 @@ uint64_t dio_init()
         vTaskDelay(1);
         if (gpio_get_level(PIN_WATER3) == 1)
         {
-            // нет смысла держать подтяжку. Экономим энергию
+            // нет смысла держать нижнюю подтяжку.
             gpio_pulldown_dis(PIN_WATER3);
+            // включаем верхнюю
+            gpio_pullup_en(PIN_WATER3);
             result.measure.d_wet_mode = 0;
         }
         else
@@ -568,6 +570,7 @@ uint64_t dio_init()
     vTaskDelay(1);
 
     ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask && BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask && BIT64(PIN_INT_ACC)) != 0));
+    
     return wake_mask;
 }
 

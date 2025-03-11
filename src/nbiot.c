@@ -363,6 +363,8 @@ void modem_task(void *arg)
                 continue;
             }
 
+            strcpy(net_status_current, "ready");
+
             // если запускаем терминал - стоп работа с модулем
             if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
             {
