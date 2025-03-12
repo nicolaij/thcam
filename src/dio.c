@@ -501,6 +501,9 @@ uint64_t dio_init()
 
     ESP_ERROR_CHECK(gpio_isr_handler_add(PIN_INT_ACC, gpio_isr_handler, (void *)PIN_INT_ACC));
 
+    gpio_hold_dis(PIN_LIGHT);
+    gpio_hold_dis(PIN_WATER3);
+
     water_cont_prepare();
     water_cont_measure(true);
 
@@ -570,7 +573,7 @@ uint64_t dio_init()
     vTaskDelay(1);
 
     ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask && BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask && BIT64(PIN_INT_ACC)) != 0));
-    
+
     return wake_mask;
 }
 

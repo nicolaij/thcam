@@ -312,7 +312,11 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     //l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>STATUS ");
+    const esp_app_desc_t *app_ver = esp_app_get_description();
+
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>Firmware: %s (%s)", app_ver->version, app_ver->date);
+
+    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", STATUS: ");
 
     if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
     {
@@ -333,6 +337,7 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
 
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", OPEN: <b>%s</b> ", (result.measure.open == 1) ? "1" : "0");
     l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", CLOSE: <b>%s</b> ", (result.measure.close == 1) ? "1" : "0");
+
 
     httpd_resp_send_chunk(req, buf, l);
 
