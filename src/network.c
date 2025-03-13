@@ -59,7 +59,9 @@ static const char *TAGH = "httpd";
 
 static int s_retry_num = 0;
 
-static char buf[CONFIG_LWIP_TCP_MSS];
+#define TRANSFER_SIZE (CONFIG_LWIP_TCP_MSS - 16) //Correction for Chunked transfer encoding
+static char network_buf[CONFIG_LWIP_TCP_MSS];
+
 size_t buf_len;
 
 int64_t timeout_begin;
@@ -275,12 +277,12 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     size_t chunksize;
     do
     {
-        chunksize = fread(buf, 1, sizeof(buf), fd);
+        chunksize = fread(network_buf, 1, TRANSFER_SIZE, fd);
 
         if (chunksize > 0)
         {
             /* Send the buffer contents as HTTP response chunk */
-            if (httpd_resp_send_chunk(req, buf, chunksize) != ESP_OK)
+            if (httpd_resp_send_chunk(req, network_buf, chunksize) != ESP_OK)
             {
                 fclose(fd);
                 ESP_LOGE(TAGH, "File %s sending failed!", filepath);
@@ -310,42 +312,42 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     struct tm *localtm = localtime(&result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
     //l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
     const esp_app_desc_t *app_ver = esp_app_get_description();
 
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<br>Firmware: %s (%s)", app_ver->version, app_ver->date);
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "<br>Firmware: %s (%s)", app_ver->version, app_ver->date);
 
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", STATUS: ");
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", STATUS: ");
 
     if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
     {
-        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>charge... </b>");
+        l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "<b>charge... </b>");
     }
 
     if (xEventGroupGetBits(status_event_group) & CHARGE_COMPLETE)
     {
-        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, "<b>Charge complete </b>");
+        l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "<b>Charge complete </b>");
     }
 
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", NB-IoT: <b>%s</b> ", net_status_current);
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", NB-IoT: <b>%s</b> ", net_status_current);
 
     if (strlen(pdp_ip) > 0)
-        l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", IP: %s", pdp_ip);
+        l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", IP: %s", pdp_ip);
 
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", Error: <b>%s %s %s %s</b>", (result.measure.d_thsensor_error == 1) ? "TH" : "", (result.measure.d_dallas_sensor_error == 1) ? "DS" : "", (result.measure.d_mag_sensor_error == 1) ? "ACC/MAG" : "", (result.measure.d_nbiot_error == 1) ? "NBIoT" : "");
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", Error: <b>%s %s %s %s</b>", (result.measure.d_thsensor_error == 1) ? "TH" : "", (result.measure.d_dallas_sensor_error == 1) ? "DS" : "", (result.measure.d_mag_sensor_error == 1) ? "ACC/MAG" : "", (result.measure.d_nbiot_error == 1) ? "NBIoT" : "");
 
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", OPEN: <b>%s</b> ", (result.measure.open == 1) ? "1" : "0");
-    l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, ", CLOSE: <b>%s</b> ", (result.measure.close == 1) ? "1" : "0");
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", OPEN: <b>%s</b> ", (result.measure.open == 1) ? "1" : "0");
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", CLOSE: <b>%s</b> ", (result.measure.close == 1) ? "1" : "0");
 
 
-    httpd_resp_send_chunk(req, buf, l);
+    httpd_resp_send_chunk(req, network_buf, l);
 
     do
     {
-        l = get_menu_html(buf);
+        l = get_menu_html(network_buf);
         if (l > 0)
-            httpd_resp_send_chunk(req, buf, l);
+            httpd_resp_send_chunk(req, network_buf, l);
 
     } while (l > 0);
 
@@ -361,7 +363,7 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
     while (remaining > 0)
     {
         /* Read the data for the request */
-        if ((ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)))) <= 0)
+        if ((ret = httpd_req_recv(req, network_buf, MIN(remaining, sizeof(network_buf)))) <= 0)
         {
             if (ret == HTTPD_SOCK_ERR_TIMEOUT)
             {
@@ -379,11 +381,11 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
         // ESP_LOGI(TAGH, "====================================");
     }
 
-    buf[req->content_len] = '\0';
+    network_buf[req->content_len] = '\0';
 
-    char *s = buf;
+    char *s = network_buf;
     char name[16];
-    while (s && s < (buf + req->content_len))
+    while (s && s < (network_buf + req->content_len))
     {
         char *e = strchr(s, '=');
         *e = '\0';
@@ -410,23 +412,23 @@ esp_err_t get_history(httpd_req_t *req)
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_hdr(req, "Connection", "close");
 
-    buf[0] = '\0';
+    network_buf[0] = '\0';
 
     int hpos = history_pos + HISTORY_SIZE;
     int hend = history_pos;
 
-    l = snprintf(&buf[l], (CONFIG_LWIP_TCP_MSS - l), "bootcount, " OUT_MEASURE_HEADERS "\n");
+    l = snprintf(&network_buf[l], (TRANSFER_SIZE - l), "bootcount, " OUT_MEASURE_HEADERS "\n");
 
     while (hpos > hend)
     {
         int indx = hpos % HISTORY_SIZE;
         // ESP_LOGI("menu", "%3i, " OUT_MEASURE_FORMATS, history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
-        l += snprintf(&buf[l], (CONFIG_LWIP_TCP_MSS - l), "%3i, " OUT_MEASURE_FORMATS "\n", history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
+        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%3i, " OUT_MEASURE_FORMATS "\n", history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
         hpos--;
 
-        if ((CONFIG_LWIP_TCP_MSS - l) < sizeof(OUT_MEASURE_FORMATS) * 2)
+        if ((TRANSFER_SIZE - l) < sizeof(OUT_MEASURE_FORMATS) * 2)
         {
-            if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+            if (httpd_resp_send_chunk(req, network_buf, l) != ESP_OK)
             {
                 ESP_LOGE("WWW", "History sending failed!");
                 /* Abort sending file */
@@ -441,7 +443,7 @@ esp_err_t get_history(httpd_req_t *req)
 
     if (l > 0)
     {
-        if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+        if (httpd_resp_send_chunk(req, network_buf, l) != ESP_OK)
         {
             ESP_LOGE("WWW", "History sending failed!");
             /* Abort sending file */
@@ -469,21 +471,21 @@ esp_err_t d_get(httpd_req_t *req)
     int l = 0;
     int ll = 0;
     int n = 0;
-    buf[0] = '\0';
+    network_buf[0] = '\0';
 
     do
     {
 
-        ll = getResult_Data(&buf[l], n);
+        ll = getResult_Data(&network_buf[l], n);
 
         if (ll == 0) // data end
             break;
 
         l = l + ll;
-        if (l > (sizeof(buf) - 128))
+        if (l > (sizeof(network_buf) - 128))
         {
             /* Send the buffer contents as HTTP response chunk */
-            if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+            if (httpd_resp_send_chunk(req, network_buf, l) != ESP_OK)
             {
                 ESP_LOGE("WWW", "File sending failed!");
                 /* Abort sending file */
@@ -500,7 +502,7 @@ esp_err_t d_get(httpd_req_t *req)
 
     if (l > 0)
     {
-        if (httpd_resp_send_chunk(req, buf, l) != ESP_OK)
+        if (httpd_resp_send_chunk(req, network_buf, l) != ESP_OK)
         {
             ESP_LOGE("WWW", "File sending failed!");
             /* Abort sending file */
@@ -534,7 +536,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
 
     while (remaining > 0)
     {
-        int recv_len = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)));
+        int recv_len = httpd_req_recv(req, network_buf, MIN(remaining, sizeof(network_buf)));
 
         // Timeout Error: Just retry
         if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
@@ -551,7 +553,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
 
         if (file_id == -1) // first data block
         {
-            file_id = buf[0];
+            file_id = network_buf[0];
 
             if (file_id == ESP_IMAGE_HEADER_MAGIC)
             {
@@ -573,7 +575,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
         if (file_id == ESP_IMAGE_HEADER_MAGIC)
         {
             // Successful Upload: Flash firmware chunk
-            if (esp_ota_write(ota_handle, (const void *)buf, recv_len) != ESP_OK)
+            if (esp_ota_write(ota_handle, (const void *)network_buf, recv_len) != ESP_OK)
             {
                 httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Flash Error");
                 return ESP_FAIL;
@@ -584,7 +586,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
             // spiffs.bin
             if (file_id == 0x80000)
             {
-                ESP_ERROR_CHECK(esp_partition_write(ota_partition, (req->content_len - remaining), (const void *)buf, recv_len));
+                ESP_ERROR_CHECK(esp_partition_write(ota_partition, (req->content_len - remaining), (const void *)network_buf, recv_len));
                 vTaskDelay(1);
             }
 
@@ -611,13 +613,13 @@ esp_err_t update_post_handler(httpd_req_t *req)
         ESP_ERROR_CHECK(esp_partition_erase_range(storage_partition, 0, 0x80000));
 
         remaining = req->content_len;
-        int recv_len = sizeof(buf);
+        int recv_len = sizeof(network_buf);
         while (remaining > 0)
         {
-            recv_len = MIN(remaining, sizeof(buf));
-            if (esp_partition_read(ota_partition, (req->content_len - remaining), (void *)buf, recv_len) == ESP_OK)
+            recv_len = MIN(remaining, sizeof(network_buf));
+            if (esp_partition_read(ota_partition, (req->content_len - remaining), (void *)network_buf, recv_len) == ESP_OK)
             {
-                ESP_ERROR_CHECK(esp_partition_write(storage_partition, (req->content_len - remaining), (const void *)buf, recv_len));
+                ESP_ERROR_CHECK(esp_partition_write(storage_partition, (req->content_len - remaining), (const void *)network_buf, recv_len));
                 vTaskDelay(1);
             }
             remaining -= recv_len;
