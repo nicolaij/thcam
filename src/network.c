@@ -59,7 +59,7 @@ static const char *TAGH = "httpd";
 
 static int s_retry_num = 0;
 
-#define TRANSFER_SIZE (CONFIG_LWIP_TCP_MSS - 16) //Correction for Chunked transfer encoding
+#define TRANSFER_SIZE (CONFIG_LWIP_TCP_MSS - 14) //Correction for Chunked transfer encoding
 static char network_buf[CONFIG_LWIP_TCP_MSS];
 
 size_t buf_len;

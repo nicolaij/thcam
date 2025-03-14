@@ -187,9 +187,16 @@ void app_main(void)
 
     EventBits_t uxBits;
 
+    // время ожидания
     int wait = get_menu_val_by_id("waitnb");
 
-    const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE;
+    // время сна в мин
+    int sleeptime = get_menu_val_by_id("time");
+
+    if (wait == 1000)                 // демонстрационный режим, без сна
+        xTaskNotifyGive(xHandleWifi); // включаем WiFi
+
+    const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE | TEST_MODE_UPDATED;
 
     uxBits = xEventGroupWaitBits(
         status_event_group, // The event group being tested.
@@ -216,6 +223,8 @@ void app_main(void)
                 pdFALSE,            // ОБА
                 wait * 60000 / portTICK_PERIOD_MS);
 
+            ESP_LOGD("main", "Wait end. uxBits: 0x%lx", uxBits);
+
             history[history_pos] = result.measure;
 
             vTaskDelay(10000 / portTICK_PERIOD_MS);
@@ -225,6 +234,11 @@ void app_main(void)
             {
                 xEventGroupSetBits(status_event_group, NOW_CHARGE);
                 continue;
+            }
+
+            if (uxBits & TEST_MODE_UPDATED)
+            {
+                history_pos = (history_pos + 1) % HISTORY_SIZE;
             }
 
         } while (((uxBits & (nowake)) != 0));
@@ -290,9 +304,6 @@ void app_main(void)
         nbiot_power_off();
     };
 
-    // время сна в мин
-    int sleeptime = get_menu_val_by_id("time");
-
     // если затопление или засвет - сон короче в 2 раза.
     if ((wake_mask & BIT64(PIN_WATER3)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
     {
@@ -323,6 +334,10 @@ void app_main(void)
         sleeptime = get_menu_val_by_id("time") * 1000;
         wake_mask = (BIT64(PIN_BATT)); // только зарядка!
     }
+
+    // если есть сигнал от датчика ACC и висит ошибка - отключаем датчик ACC ( он неисправен/отсутствует)
+    if (gpio_get_level(PIN_INT_ACC) == 1 && result.measure.d_mag_sensor_error)
+        wake_mask &= ~BIT64(PIN_INT_ACC);
 
     dio_sleep(wake_mask);
 

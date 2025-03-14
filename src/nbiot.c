@@ -333,7 +333,7 @@ void modem_task(void *arg)
     char datetime[24];
 
     strcpy(net_status_current, "OFF");
-    result.measure.d_nbiot_error = true;
+    result.measure.d_nbiot_error = false;
     int d_nbiot_error_counter = 5;
 
     while (1)
@@ -350,6 +350,8 @@ void modem_task(void *arg)
             ee = at_reply_wait("AT\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
+                result.measure.d_nbiot_error = true;
+
                 ESP_LOGW(TAG, "Modem not reply");
                 strcpy(net_status_current, "Modem not reply");
 
@@ -364,6 +366,7 @@ void modem_task(void *arg)
             }
 
             strcpy(net_status_current, "ready");
+            result.measure.d_nbiot_error = false;
 
             // если запускаем терминал - стоп работа с модулем
             if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
@@ -624,7 +627,7 @@ void modem_task(void *arg)
             {
                 break;
             }
-            
+
             int ip = get_menu_val_by_id("ip");
             /*
                         // ping
@@ -666,12 +669,12 @@ void modem_task(void *arg)
 
             int socket = 0;
 
-            int port = get_menu_val_by_id("tcpport");
+            int tcpport = get_menu_val_by_id("tcpport");
             int udpport = get_menu_val_by_id("udpport");
 
             int protocol = 1; // TCP = 1, UDP =2
 
-            if (port > 0)
+            if (tcpport > 0)
             {
                 protocol = 1;
                 ee = at_reply_wait_OK("AT+CSOSENDFLAG=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
@@ -679,7 +682,7 @@ void modem_task(void *arg)
             else if (udpport > 0)
             {
                 protocol = 2;
-                port = udpport;
+                tcpport = udpport;
             }
             else
             {
@@ -702,7 +705,7 @@ void modem_task(void *arg)
                 try_counter = 3;
                 while (try_counter)
                 {
-                    snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,%i,\"%i.%i.%i.%i\"\r\n", socket, port, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
+                    snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,%i,\"%i.%i.%i.%i\"\r\n", socket, tcpport, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
                     ee = at_reply_wait_OK(send_data, (char *)data, 60000 / portTICK_PERIOD_MS);
                     if (ee != ESP_OK)
                     {
@@ -721,6 +724,7 @@ void modem_task(void *arg)
                     }
                     else
                     {
+                        result.measure.d_nbiot_error = false;
                         // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
                         // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
                         snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));

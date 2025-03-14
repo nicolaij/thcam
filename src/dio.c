@@ -685,12 +685,37 @@ void btn_task(void *arg)
     const int short_count = 4;
     const int long_count = 50;
 
+    // время сна в мин
+    int sleeptime = get_menu_val_by_id("time");
+
+    // время ожидания
+    int wait = get_menu_val_by_id("waitnb");
+
+    int64_t start_time = esp_timer_get_time();
+
+    // while ((esp_timer_get_time() - start_time) < ticks_to_wait * portTICK_PERIOD_MS * 1000)
+
     // vTaskDelay(pdMS_TO_TICKS(500));
 
     while (true)
     {
         vTaskDelay(pdMS_TO_TICKS(20));
 
+        if (wait == 1000) // демонстрационный режим, без сна
+        {
+            if ((esp_timer_get_time() - start_time) > (sleeptime * 60LL * 1000000LL))
+            {
+                xTaskNotifyGive(xTaskDallas);
+                xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
+                water_cont_measure(false);
+                light_measure(0);
+
+                start_time = esp_timer_get_time();
+
+                xEventGroupSetBits(status_event_group, TEST_MODE_UPDATED);
+            }
+        }
+        
         if (gpio_get_level(PIN_BUTTON_BOOT) == 0)
         {
             debounce++;
