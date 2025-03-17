@@ -258,9 +258,13 @@
         <fieldset>
           <legend>Текущие параметры</legend>
           <input type="checkbox" id="open" name="open" value="open" onchange="storeCheckbox(this)" />
-          <label for="open">Открыто</label><div id="openflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block" ></div><br />
+          <label for="open">Открыто</label>
+          <div id="openflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block"></div>
+          <br />
           <input type="checkbox" id="close" name="close" value="close" onchange="storeCheckbox(this)" />
-          <label for="close">Закрыто</label><div id="closeflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block" ></div><br />
+          <label for="close">Закрыто</label>
+          <div id="closeflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block"></div>
+          <br />
         </fieldset>
       </fieldset>
     </div>
@@ -326,8 +330,8 @@
       socket.onmessage = function (e) {
         //console.log(e);
         res = e.data.split(",");
-        acc = [res[0], res[1], res[2]];//res[0].split(" ");
-        mag = [res[3], res[4], res[5]];//mag = res[1].split(" ");
+        acc = [res[0], res[1], res[2]]; //res[0].split(" ");
+        mag = [res[3], res[4], res[5]]; //mag = res[1].split(" ");
         flags = Number(res[6]);
 
         gauge_value(Number(acc[0]), "accx");
@@ -342,20 +346,18 @@
         gauge_value(Number(mag[2]), "magz");
         gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
 
-        if(flags & (1<<12)) document.getElementById("openflag").style.backgroundColor = "red";
+        if (flags & (1 << 12)) document.getElementById("openflag").style.backgroundColor = "red";
         else document.getElementById("openflag").style.backgroundColor = "transparent";
 
-        if(flags & (1<<13)) document.getElementById("closeflag").style.backgroundColor = "red";
+        if (flags & (1 << 13)) document.getElementById("closeflag").style.backgroundColor = "red";
         else document.getElementById("closeflag").style.backgroundColor = "transparent";
       };
 
       window.onload = function () {
-        //console.log(document.readyState);
-        var xhttp = new XMLHttpRequest();
-        xhttp.onreadystatechange = function () {
-          if (this.readyState == 4 && this.status == 200) {
-            document.getElementById("settingscontent").innerHTML = this.response;
-
+        fetch("/menu")
+          .then((response) => { return response.text()})
+          .then((data) => {
+            document.getElementById("settingscontent").innerHTML = data;
             if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
             if (document.getElementById("enableclosemagX").innerHTML) use = "mag";
             if (document.getElementById("enableopenaccX").innerHTML) use = "acc";
@@ -363,24 +365,15 @@
 
             if (use == "mag") document.getElementById("usemag").checked = true;
             if (use == "acc") document.getElementById("useacc").checked = true;
-          }
-        };
-        xhttp.open("GET", "/menu", true);
-        xhttp.send();
-        xhttp.onload = function () {
-          //console.log(document.getElementById("ip"));
-          document.getElementById("ip").value = num2string(document.getElementById("ip").value);
-        };
 
-        var xhttp2 = new XMLHttpRequest();
-        xhttp2.onreadystatechange = function () {
-          if (this.readyState == 4 && this.status == 200) {
-            document.getElementById("filecontent").innerHTML = this.response.replace(/(?:\r\n|\r|\n)/g, "<br>");
-            //console.log(this.response);
-          }
-        };
-        xhttp2.open("GET", "/history", true);
-        xhttp2.send();
+            document.getElementById("ip").value = num2string(document.getElementById("ip").value);
+        })
+        
+        fetch("/history")
+          .then((response) => { return response.text()})
+          .then((data) => {
+            document.getElementById("filecontent").innerHTML = data.replace(/(?:\r\n|\r|\n)/g, "<br>");
+        })
       };
 
       function toggleCheckbox(element) {
