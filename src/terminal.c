@@ -365,11 +365,16 @@ void console_task(void *arg)
                         int pos = history_pos + HISTORY_SIZE;
                         int end = history_pos;
                         ESP_LOGI("menu", "-------------------------------------------");
-                        ESP_LOGI("menu", "bootcount, " OUT_MEASURE_HEADERS);
+                        ESP_LOGI("menu", "bootcount, datetime, " OUT_MEASURE_HEADERS);
                         while (pos > end)
                         {
                             int indx = pos % HISTORY_SIZE;
-                            ESP_LOGI("menu", "%3i, " OUT_MEASURE_FORMATS, history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
+
+                            char datetime[24];
+                            struct tm *localtm = localtime(&history[indx].ttime);
+                            strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
+
+                            ESP_LOGI("menu", "%3i, %s, " OUT_MEASURE_FORMATS, history[indx].measure.bootcount, datetime, OUT_MEASURE_VARS(history[indx].measure));
                             pos--;
                         }
 
@@ -407,7 +412,6 @@ void console_task(void *arg)
                     else if (n == sizeof(menu) / sizeof(menu_t) + 5) // WiFi
                     {
                         xTaskNotifyGive(xHandleWifi); // включаем WiFi
-
                         enter_value = 0;
                     }
                     else
@@ -417,8 +421,6 @@ void console_task(void *arg)
                         strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
                         ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
-                        // get_menu_json(printbuf);
-                        // ESP_LOGI("result", "%s", printbuf);
 
                         ESP_LOGI("menu", "-------------------------------------------");
                         int i = 0;

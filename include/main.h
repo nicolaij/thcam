@@ -173,7 +173,7 @@ extern result_data_t result;
 #define OUT_MEASURE_FORMATS "%2.0f, %.3f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, "OUT_MEASURE_ACC_FORMATS
 
 #define HISTORY_SIZE 100
-extern measure_data_t history[HISTORY_SIZE];
+extern result_data_t history[HISTORY_SIZE];
 extern int history_pos;
 
 extern int bootCount;

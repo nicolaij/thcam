@@ -341,7 +341,7 @@ void water_cont_measure(bool printdata)
 
         int batt = result.measure.nbbattery;
         if (batt == 0)
-            batt = history[(history_pos - 1) % HISTORY_SIZE].nbbattery; // old_result.measure.nbbattery;
+            batt = history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery; // old_result.measure.nbbattery;
         if (batt == 0)
             batt = 3300;
 
@@ -411,6 +411,8 @@ void water_cont_measure(bool printdata)
             result.measure.water = w1;
         }
     }
+
+    result.ttime = time(0);
 }
 
 void light_measure(int test_count)
@@ -715,7 +717,7 @@ void btn_task(void *arg)
                 xEventGroupSetBits(status_event_group, TEST_MODE_UPDATED);
             }
         }
-        
+
         if (gpio_get_level(PIN_BUTTON_BOOT) == 0)
         {
             debounce++;

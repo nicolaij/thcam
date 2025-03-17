@@ -59,7 +59,7 @@ static const char *TAGH = "httpd";
 
 static int s_retry_num = 0;
 
-#define TRANSFER_SIZE (CONFIG_LWIP_TCP_MSS - 14) //Correction for Chunked transfer encoding
+#define TRANSFER_SIZE (CONFIG_LWIP_TCP_MSS - 14) // Correction for Chunked transfer encoding
 static char network_buf[CONFIG_LWIP_TCP_MSS];
 
 size_t buf_len;
@@ -311,7 +311,7 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     char datetime[24];
     struct tm *localtm = localtime(&result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
-    //l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
+    // l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
     const esp_app_desc_t *app_ver = esp_app_get_description();
@@ -339,7 +339,6 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
 
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", OPEN: <b>%s</b> ", (result.measure.open == 1) ? "1" : "0");
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", CLOSE: <b>%s</b> ", (result.measure.close == 1) ? "1" : "0");
-
 
     httpd_resp_send_chunk(req, network_buf, l);
 
@@ -417,13 +416,17 @@ esp_err_t get_history(httpd_req_t *req)
     int hpos = history_pos + HISTORY_SIZE;
     int hend = history_pos;
 
-    l = snprintf(&network_buf[l], (TRANSFER_SIZE - l), "bootcount, " OUT_MEASURE_HEADERS "\n");
+    l = snprintf(&network_buf[l], (TRANSFER_SIZE - l), "bootcount, datetime, " OUT_MEASURE_HEADERS "\n");
 
     while (hpos > hend)
     {
         int indx = hpos % HISTORY_SIZE;
-        // ESP_LOGI("menu", "%3i, " OUT_MEASURE_FORMATS, history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
-        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%3i, " OUT_MEASURE_FORMATS "\n", history[indx].bootcount, OUT_MEASURE_VARS(history[indx]));
+
+        char datetime[24];
+        struct tm *localtm = localtime(&history[indx].ttime);
+        strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
+
+        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%3i, %s, " OUT_MEASURE_FORMATS "\n", history[indx].measure.bootcount, datetime, OUT_MEASURE_VARS(history[indx].measure));
         hpos--;
 
         if ((TRANSFER_SIZE - l) < sizeof(OUT_MEASURE_FORMATS) * 2)

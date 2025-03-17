@@ -18,7 +18,7 @@ result_data_t result;
 RTC_DATA_ATTR int bootCount = 0;
 RTC_DATA_ATTR int history_pos = 0;
 
-RTC_DATA_ATTR measure_data_t history[HISTORY_SIZE];
+RTC_DATA_ATTR result_data_t history[HISTORY_SIZE];
 
 EventGroupHandle_t status_event_group;
 
@@ -205,7 +205,7 @@ void app_main(void)
         pdFALSE,            // ОБА
         wait * 60000 / portTICK_PERIOD_MS);
 
-    history[history_pos] = result.measure;
+    history[history_pos] = result;
 
     if (get_charge()) // идет зарядка
     {
@@ -225,7 +225,7 @@ void app_main(void)
 
             ESP_LOGD("main", "Wait end. uxBits: 0x%lx", uxBits);
 
-            history[history_pos] = result.measure;
+            history[history_pos] = result;
 
             vTaskDelay(10000 / portTICK_PERIOD_MS);
 
@@ -311,8 +311,8 @@ void app_main(void)
             sleeptime = get_menu_val_by_id("time") / 2;
     }
 
-    // если проснулись от затопления или засвета - следующий сон 5 мин.
-    if (result.measure.d_light || result.measure.d_water)
+    // если проснулись от затопления или засвета или изменения положения - следующий сон 5 мин.
+    if (result.measure.d_light || result.measure.d_water || result.measure.d_acc_int)
     {
         sleeptime = 5;
     }
