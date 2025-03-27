@@ -216,14 +216,17 @@ void app_main(void)
     {
         do // Ждем истечения таймаута
         {
+            wait = get_menu_val_by_id("waitnb");
+            
             uxBits = xEventGroupWaitBits(
                 status_event_group, // The event group being tested.
                 nowake,             // The bits within the event group to wait for.
                 pdTRUE,             // BIT_0 & BIT_1 should be cleared before returning.
                 pdFALSE,            // ОБА
                 wait * 60000 / portTICK_PERIOD_MS);
-
-            ESP_LOGD("main", "Wait end. uxBits: 0x%lx", uxBits);
+            
+            if ((uxBits & (NB_TERMINAL)) == 0)
+                ESP_LOGD("main", "Wait end. uxBits: 0x%lx", uxBits);
 
             history[history_pos] = result;
 
@@ -292,6 +295,7 @@ void app_main(void)
             rename(filepath, "/spiffs/old" DATAFILE);
         };
     */
+#if !defined NBIOT_PSM 
     if ((uxBits & END_RADIO) == 0)
     {
         // даем время выключиться
@@ -303,6 +307,7 @@ void app_main(void)
         // если модуль nbiot не выключился - то выключаем принудительно
         nbiot_power_off();
     };
+#endif
 
     // если затопление или засвет - сон короче в 2 раза.
     if ((wake_mask & BIT64(PIN_WATER3)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)

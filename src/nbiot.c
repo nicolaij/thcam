@@ -19,6 +19,60 @@ char net_status_current[32];
 
 RTC_DATA_ATTR bool run_first = false;
 
+unsigned int fromActiveTime(uint8_t val)
+{
+    uint8_t unit = val >> 5;
+    uint8_t value = val & 0b11111;
+
+    switch (unit)
+    {
+    case 0:
+        return value * 2;
+        break;
+    case 1:
+        return value * 60;
+        break;
+    case 2:
+        return value * 60 * 6;
+        break;
+    }
+
+    return 0;
+}
+
+unsigned int fromPeriodicTAU(uint8_t val)
+{
+    uint8_t unit = val >> 5;
+    uint8_t value = val & 0b11111;
+
+    switch (unit)
+    {
+    case 0:
+        return value * 60 * 10;
+        break;
+    case 1:
+        return value * 60 * 60;
+        break;
+    case 2:
+        return value * 60 * 60 * 10;
+        break;
+    case 3:
+        return value * 2;
+        break;
+    case 4:
+        return value * 30;
+        break;
+    case 5:
+        return value * 60;
+        break;
+    case 6:
+        return value * 60 * 60 * 320;
+        break;
+    }
+
+    return 0;
+}
+
 esp_err_t print_atcmd(const char *cmd, char *buffer)
 {
     int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
@@ -39,31 +93,6 @@ esp_err_t print_atcmd(const char *cmd, char *buffer)
     return ESP_OK;
 }
 
-esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickType_t timeout)
-{
-    int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
-    if (txBytes < 4)
-    {
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    int len = uart_read_bytes(UART_NUM_1, buffer, (RX_BUF_SIZE - 1), timeout);
-    if (len < 4)
-    {
-        return ESP_ERR_TIMEOUT;
-    };
-
-    buffer[len] = '\0';
-    ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
-
-    if (strstr((const char *)buffer, wait) == NULL)
-    {
-        return ESP_FAIL;
-    }
-
-    return ESP_OK;
-}
-
 esp_err_t wait_string(char *buffer, const char *wait, TickType_t ticks_to_wait)
 {
 
@@ -75,7 +104,7 @@ esp_err_t wait_string(char *buffer, const char *wait, TickType_t ticks_to_wait)
     esp_err_t res = ESP_ERR_TIMEOUT;
     do
     {
-        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), pdMS_TO_TICKS(500));
+        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), 1);
         // ESP_LOGV(TAG, "len: %d", len);
         if (len > 0)
         {
@@ -102,46 +131,31 @@ esp_err_t wait_string(char *buffer, const char *wait, TickType_t ticks_to_wait)
     return res;
 }
 
-esp_err_t wait_OK(char *buffer, TickType_t ticks_to_wait)
+esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickType_t ticks_to_wait)
 {
-
-    const char *wait = "OK\r\n";
-    const char *err = "ERROR\r\n";
-
-    int64_t start_time = esp_timer_get_time();
-    char *pb = buffer;
-    *pb = '\0';
     esp_err_t res = ESP_ERR_TIMEOUT;
-    while ((esp_timer_get_time() - start_time) < ticks_to_wait * portTICK_PERIOD_MS * 1000)
+    int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
+    if (txBytes < 4)
     {
-        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), pdMS_TO_TICKS(500));
-        // ESP_LOGV(TAG, "len: %d", len);
-        if (len > 0)
-        {
-            pb += len;
-            *pb = '\0';
-
-            if (strstr((const char *)buffer, wait) != NULL)
-            {
-                res = ESP_OK;
-                break;
-            }
-            else if (strstr((const char *)buffer, err) != NULL)
-            {
-                res = ESP_ERR_INVALID_STATE;
-                break;
-            }
-        }
-        else if (len == -1)
-        {
-            return ESP_FAIL;
-        }
+        return ESP_ERR_INVALID_SIZE;
     }
+
+    res = wait_string(buffer, wait, ticks_to_wait);
+
+    ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
 
     return res;
 }
 
-esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t timeout)
+esp_err_t wait_OK(char *buffer, TickType_t ticks_to_wait)
+{
+    const char *wait = "OK\r\n";
+    esp_err_t res = wait_string(buffer, wait, ticks_to_wait);
+
+    return res;
+}
+
+esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t ticks_to_wait)
 {
     esp_err_t res = ESP_FAIL;
 
@@ -153,7 +167,7 @@ esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t timeout)
         return ESP_ERR_INVALID_SIZE;
     }
 
-    res = wait_OK(buffer, timeout);
+    res = wait_OK(buffer, ticks_to_wait);
 
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
     return res;
@@ -165,7 +179,7 @@ wait "+CMUX:"
 дальше пробел " "
 дальше цифры через запятую "0,0,0,31,10,3,30,10,2" (9 штук)
 */
-esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *resultdata, int resultcount, TickType_t timeout)
+esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *resultdata, int resultcount, TickType_t ticks_to_wait)
 {
     int txBytes = uart_write_bytes(UART_NUM_1, cmd, strlen(cmd));
     if (txBytes < 4)
@@ -173,13 +187,8 @@ esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *res
         return ESP_ERR_INVALID_SIZE;
     }
 
-    int len = uart_read_bytes(UART_NUM_1, buffer, (RX_BUF_SIZE - 1), timeout);
-    if (len < 4)
-    {
-        return ESP_ERR_TIMEOUT;
-    };
+    esp_err_t res = wait_OK(buffer, ticks_to_wait);
 
-    buffer[len] = '\0';
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
 
     char *s = strstr((const char *)buffer, wait);
@@ -216,6 +225,7 @@ esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *res
 */
 esp_err_t at_csosend(int socket, char *data, char *buffer)
 {
+    esp_err_t res = ESP_FAIL;
     char buf[14];
     int len_data = strlen(data);
 
@@ -243,16 +253,10 @@ esp_err_t at_csosend(int socket, char *data, char *buffer)
     }
     txBytes = uart_write_bytes(UART_NUM_1, "\r", 1);
 
-    int len = uart_read_bytes(UART_NUM_1, buffer, (RX_BUF_SIZE - 1), 30000 / portTICK_PERIOD_MS);
-    if (len < 4)
-    {
-        return ESP_ERR_TIMEOUT;
-    };
-
-    buffer[len] = '\0';
+    res = wait_OK(buffer, 30000 / portTICK_PERIOD_MS);
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
 
-    return ESP_OK;
+    return res;
 }
 
 esp_err_t at_csosend_wait_SEND(int socket, char *data, char *buffer)
@@ -316,7 +320,7 @@ void modem_task(void *arg)
     gpio_set_level(MODEM_POWER, 1);
 
     const uart_config_t uart_config = {
-        .baud_rate = 9600,
+        .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
@@ -336,6 +340,8 @@ void modem_task(void *arg)
     result.measure.d_nbiot_error = false;
     int d_nbiot_error_counter = 5;
 
+    int protocol = 1; // TCP = 1, UDP =2
+
     while (1)
     {
         /* Ждем необходимости запуска передачи, либо зарядка*/
@@ -346,24 +352,55 @@ void modem_task(void *arg)
             uart_flush(UART_NUM_1);
 
             esp_err_t ee = 0;
+
             // check modem
-            ee = at_reply_wait("AT\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
+            ee = at_reply_wait_OK("AT\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
                 result.measure.d_nbiot_error = true;
+                d_nbiot_error_counter--;
 
                 ESP_LOGW(TAG, "Modem not reply");
                 strcpy(net_status_current, "Modem not reply");
 
-                if ((xEventGroupGetBits(status_event_group) & END_WORK_NBIOT) || d_nbiot_error_counter-- == 0)
+                if ((xEventGroupGetBits(status_event_group) & END_WORK_NBIOT) || d_nbiot_error_counter == 0)
                     break;
 
+#ifdef NBIOT_PSM
+                if (d_nbiot_error_counter == 1)
+                {
+                    // power on
+                    nbiot_power_pin(1000 / portTICK_PERIOD_MS);
+                    vTaskDelay(3000 / portTICK_PERIOD_MS);
+                }
+                else
+                {
+                    gpio_set_level(MODEM_POWER, 0);
+                    vTaskDelay(10);
+                    gpio_set_level(MODEM_POWER, 1);
+                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+                    /*
+                                        int64_t start_time = esp_timer_get_time();
+                                        gpio_set_level(MODEM_POWER, 0);
+                                        // wait 5ms
+                                        while ((esp_timer_get_time() - start_time) < (5000LL))
+                                        {
+                                            portNOP();
+                                        }
+                                        ESP_LOGW(TAG, "time: %lli", (esp_timer_get_time() - start_time));
+                                        gpio_set_level(MODEM_POWER, 1);
+                    */
+                }
+#else
                 // power on
                 nbiot_power_pin(1000 / portTICK_PERIOD_MS);
-
                 vTaskDelay(2000 / portTICK_PERIOD_MS);
+#endif
                 continue;
             }
+
+            ee = at_reply_wait_OK("ATE1;+IPR=115200\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 
             strcpy(net_status_current, "ready");
             result.measure.d_nbiot_error = false;
@@ -374,7 +411,7 @@ void modem_task(void *arg)
                 break;
             }
 
-            ee = at_reply_wait("ATE1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
+            // ee = at_reply_wait("ATE1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
 
             // Battery Charge
             int cbc[2] = {-1, -1};
@@ -433,9 +470,9 @@ void modem_task(void *arg)
                 if ((try_counter % 3) == 0) // if fail restart sim
                 {
                     ESP_LOGI(TAG, "Modem CFUN Reset");
-                    at_reply_wait("AT+CFUN=0\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
+                    at_reply_wait_OK("AT+CFUN=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                     vTaskDelay(5000 / portTICK_PERIOD_MS);
-                    at_reply_wait("AT+CFUN=1\r\n", "OK", (char *)data, 1000 / portTICK_PERIOD_MS);
+                    at_reply_wait_OK("AT+CFUN=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                     vTaskDelay(5000 / portTICK_PERIOD_MS);
                 }
 
@@ -450,6 +487,49 @@ void modem_task(void *arg)
             result.measure.d_nbiot_error = false;
             strcpy(net_status_current, "Network search...");
 
+#ifdef NBIOT_PSM
+            if (run_first == false)
+            {
+                at_reply_wait_OK("AT+CEREG=5\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+            }
+            //+CEREG: 5,1,"00A0","0002920C",9,"00",0,0,"00100010","00010010"
+
+            // Network Registration Status
+            int try_network = 60;
+            int tAT = 0;
+            int tRT = 0;
+            while (try_network > 0)
+            {
+                int creg[10] = {-1, -1};
+                ee = at_reply_get("AT+CEREG?\r\n", "CEREG:", (char *)data, creg, 10, 1000 / portTICK_PERIOD_MS);
+                if (ee != ESP_OK)
+                {
+                    ESP_LOGW(TAG, "AT+CREG?");
+                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+                }
+                else
+                {
+                    if (creg[1] == 1) // 1 Registered, home network.
+                    {
+                        char bf[10];
+                        snprintf(bf, 9, "%8X", creg[8]);
+                        tAT = fromActiveTime(strtol(bf, NULL, 2));
+                        snprintf(bf, 9, "%8X", creg[9]);
+                        tRT = fromPeriodicTAU(strtol(bf, NULL, 2));
+                        ESP_LOGI(TAG, "Registered. Home network. TAC=%u, CI=%u Active-Time=%02d:%02d:%02d Periodic-TAU=%02d:%02d:%02d", creg[2], creg[3], (tAT / (60 * 60)), (tAT / 60) % 60, (tAT % 60), (tRT / (60 * 60)), (tRT / 60) % 60, (tRT % 60));
+                        break;
+                    }
+                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+                }
+                try_network--;
+
+                // если запускаем терминал - стоп работа с модулем
+                if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
+                {
+                    break;
+                }
+            }
+#else
             at_reply_wait_OK("AT+CREG=2\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 
             // Network Registration Status
@@ -479,15 +559,20 @@ void modem_task(void *arg)
                     break;
                 }
             }
+#endif
 
             // Signal Quality Report
             int csq[2] = {-1, -1};
             ee = at_reply_get("AT+CSQ\r\n", "CSQ:", (char *)data, csq, 2, 1000 / portTICK_PERIOD_MS);
-            result.measure.rssi = csq[0] * 2.0 + -113.0;
             if (ee != ESP_OK)
             {
                 ESP_LOGW(TAG, "AT+CSQ");
                 vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
+            else
+            {
+                result.measure.rssi = csq[0] * 2.0 + -113.0;
+                ESP_LOGI(TAG, "RSSI: %.0f", result.measure.rssi);
             }
 
             // Clock
@@ -495,11 +580,19 @@ void modem_task(void *arg)
             {
                 // AT+CURTC? AT+CTZR?
                 // ee = at_reply_wait_OK("AT+CTZR=?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                ee = at_reply_wait_OK("AT+CURTC=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                ee = at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                ee = at_reply_wait_OK("AT+CURTC=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS); // CCLK show UTC time after network time synchronization
+                ee = at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);  // Automatic time update via NITZ
+
+#ifdef NBIOT_PSM
+                at_reply_wait_OK("AT+CPSMSTATUS=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                // #TAU 30sec * 3 , ACC 8 sec
+                at_reply_wait_OK("AT+CPSMS=1,,,\"10000011\",\"00000100\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+#endif
+
                 run_first = true;
             }
-            ee = at_reply_wait("AT+CCLK?\r\n", "CCLK:", (char *)data, 1000 / portTICK_PERIOD_MS);
+
+            ee = at_reply_wait_OK("AT+CCLK?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
                 ESP_LOGW(TAG, "AT+CCLK?");
@@ -588,7 +681,7 @@ void modem_task(void *arg)
             // ee = at_reply_wait_OK("AT+CTZU?\r\n", (char *)data, 10000 / portTICK_PERIOD_MS);
 
             // Show the Complete PDP Address
-            ee = at_reply_wait("AT+IPCONFIG\r\n", "IPCONFIG:", (char *)data, 1000 / portTICK_PERIOD_MS);
+            ee = at_reply_wait_OK("AT+IPCONFIG\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
             if (ee != ESP_OK)
             {
                 ESP_LOGW(TAG, "AT+IPCONFIG");
@@ -672,8 +765,6 @@ void modem_task(void *arg)
             int tcpport = get_menu_val_by_id("tcpport");
             int udpport = get_menu_val_by_id("udpport");
 
-            int protocol = 1; // TCP = 1, UDP =2
-
             if (tcpport > 0)
             {
                 protocol = 1;
@@ -731,7 +822,12 @@ void modem_task(void *arg)
 
                         ESP_LOGI(TAG, "Send...");
 
-                        ee = at_csosend_wait_SEND(socket, send_data, (char *)data);
+                        if (protocol == 1) // TCP
+                            ee = at_csosend_wait_SEND(socket, send_data, (char *)data);
+
+                        if (protocol == 2) // UDP
+                            ee = at_csosend(socket, send_data, (char *)data);
+
                         if (ee == ESP_OK)
                         {
                             // print_atcmd("AT+CSOACK\r\n", (char *)data);
@@ -751,23 +847,64 @@ void modem_task(void *arg)
                 // vTaskDelay(10000 / portTICK_PERIOD_MS);
             };
 
-            snprintf(send_data, sizeof(send_data), "AT+CSOCL=%i\r\n", socket);
-            at_reply_wait_OK(send_data, (char *)data, 1000 / portTICK_PERIOD_MS); // CLOSE socket
+            // wait 10s for reply from server
+            int64_t start_time = esp_timer_get_time();
+            do
+            {
+                if (wait_string(data, "\r\n", 1000 / portTICK_PERIOD_MS) == ESP_OK)
+                {
+                    ESP_LOGI(TAG, "Modem: %s", data);
+                    const char *pdata = strstr((const char *)data, "+CSONMI: ");
+                    if (pdata)
+                    { //+CSONMI: 0,20,5468616E6B20796F7521
+                        char *s = strchr(pdata, ',');
+                        if (s)
+                        {
+                            // len
+                            int l = atoi(s + 1);
+                            s = strchr(s + 1, ',');
+                            if (s++)
+                            {
+                                // message
+                                for (int i = 0; i < l; i = i + 2)
+                                {
+                                    char c[3] = {*(s++), *(s++), 0};
+                                    send_data[i / 2] = (char)strtol(c, NULL, 16);
+                                }
+                                send_data[l / 2] = '\0';
+                                ESP_LOGI(TAG, "Text: %s", send_data);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } while ((esp_timer_get_time() - start_time) < 10 * 1000000);
+
+            if (protocol == 1) // TCP
+            {
+                snprintf(send_data, sizeof(send_data), "AT+CSOCL=%i\r\n", socket);
+                at_reply_wait_OK(send_data, (char *)data, 1000 / portTICK_PERIOD_MS); // CLOSE socket
+            }
             break;
         };
 
+        // clear notify
+        ulTaskNotifyTake(pdTRUE, 0);
+
+        // если есть бит END_WORK - то модуль уже выключили из main()
+        // if ((xEventGroupGetBits(status_event_group) & END_WORK) == 0)
+        //{
+        // ВЫКЛЮЧАЕМ
+#if !defined NBIOT_PSM
         // если запускаем терминал - стоп работа с модулем
         if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
         {
             continue;
         }
 
-        // если есть бит END_WORK - то модуль уже выключили из main()
-        // if ((xEventGroupGetBits(status_event_group) & END_WORK) == 0)
-        //{
-        // ВЫКЛЮЧАЕМ
         if (print_atcmd("AT+CPOWD=1\r\n", data) == ESP_OK)
             strcpy(net_status_current, "Success OFF");
+#endif
         // print_atcmd("AT+CFUN=0\r\n", data);
         //}
         // else

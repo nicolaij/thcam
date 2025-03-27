@@ -353,7 +353,7 @@
         else document.getElementById("closeflag").style.backgroundColor = "transparent";
       };
 
-      window.onload = function () {
+      function ready() {
         fetch("/menu")
           .then((response) => { return response.text()})
           .then((data) => {
@@ -375,6 +375,8 @@
             document.getElementById("filecontent").innerHTML = data.replace(/(?:\r\n|\r|\n)/g, "<br>");
         })
       };
+
+      document.addEventListener("DOMContentLoaded", ready);
 
       function toggleCheckbox(element) {
         if (element.checked == true) {
