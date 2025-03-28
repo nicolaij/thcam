@@ -21,7 +21,7 @@ extern TaskHandle_t xHandleNB;
 extern TaskHandle_t xTaskI2C;
 
 menu_t menu[] = {
-    {.id = "id", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
+    {.id = "idn", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
     {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 10, .max = 100000},
     {.id = "waitnb", .name = "Ожидание NB-IoT, WiFi", .izm = "мин", .val = 3, .min = 1, .max = 1000},
     //{.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
@@ -420,7 +420,7 @@ void console_task(void *arg)
                         struct tm *localtm = localtime(&result.ttime);
                         strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
-                        ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+                        ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
                         ESP_LOGI("menu", "-------------------------------------------");
                         int i = 0;

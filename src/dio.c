@@ -507,7 +507,7 @@ uint64_t dio_init()
     gpio_hold_dis(PIN_WATER3);
 
     water_cont_prepare();
-    water_cont_measure(true);
+    water_cont_measure(false);
 
     light_adc_init();
     light_measure(0);

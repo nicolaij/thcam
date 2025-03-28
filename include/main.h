@@ -4,6 +4,8 @@
 
 #include "esp_log.h"
 
+#include "cJSON.h"
+
 #include <sys/time.h>
 
 #define MODEM_POWER GPIO_NUM_10

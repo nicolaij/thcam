@@ -217,7 +217,7 @@ void app_main(void)
         do // Ждем истечения таймаута
         {
             wait = get_menu_val_by_id("waitnb");
-            
+
             uxBits = xEventGroupWaitBits(
                 status_event_group, // The event group being tested.
                 nowake,             // The bits within the event group to wait for.
@@ -346,7 +346,7 @@ void app_main(void)
 
     dio_sleep(wake_mask);
 
-    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
+    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
 
     // если зарядка - сон 5 мин.
     // if (result.measure.d_charge || get_charge())

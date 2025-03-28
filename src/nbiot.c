@@ -586,7 +586,12 @@ void modem_task(void *arg)
 #ifdef NBIOT_PSM
                 at_reply_wait_OK("AT+CPSMSTATUS=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                 // #TAU 30sec * 3 , ACC 8 sec
-                at_reply_wait_OK("AT+CPSMS=1,,,\"10000011\",\"00000100\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                // at_reply_wait_OK("AT+CPSMS=1,,,\"10000011\",\"00000100\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                // TAU 25h 1*25, ACC 0 sec
+                at_reply_wait_OK("AT+CPSMS=1,,,\"00111001\",\"00000000\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+
+                // CREATE UDP port
+                // at_reply_wait_OK("AT+CSOC=1,2,1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 #endif
 
                 run_first = true;
@@ -817,8 +822,8 @@ void modem_task(void *arg)
                     {
                         result.measure.d_nbiot_error = false;
                         // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
-                        // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("id"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
-                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+                        // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("idn"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
+                        snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
                         ESP_LOGI(TAG, "Send...");
 
@@ -853,7 +858,7 @@ void modem_task(void *arg)
             {
                 if (wait_string(data, "\r\n", 1000 / portTICK_PERIOD_MS) == ESP_OK)
                 {
-                    ESP_LOGI(TAG, "Modem: %s", data);
+                    // ESP_LOGI(TAG, "Modem: %s", data);
                     const char *pdata = strstr((const char *)data, "+CSONMI: ");
                     if (pdata)
                     { //+CSONMI: 0,20,5468616E6B20796F7521
@@ -872,7 +877,27 @@ void modem_task(void *arg)
                                     send_data[i / 2] = (char)strtol(c, NULL, 16);
                                 }
                                 send_data[l / 2] = '\0';
-                                ESP_LOGI(TAG, "Text: %s", send_data);
+
+                                cJSON *json = cJSON_Parse((const char *)send_data);
+                                if (json)
+                                {
+                                    // ESP_LOGI(TAG, "json: %s", cJSON_Print(json));
+                                    cJSON *item = NULL;
+                                    cJSON_ArrayForEach(item, json)
+                                    {
+                                        ESP_LOGI(TAG, "item %s: %d\n", item->string, item->valueint);
+                                        if (get_menu_val_by_id(item->string) != item->valueint)
+                                        {
+                                            set_menu_val_by_id(item->string, item->valueint);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    const char *er = cJSON_GetErrorPtr();
+                                    ESP_LOGW(TAG, "Parse err: %c in \"%s\"", *er, send_data);
+                                }
+                                cJSON_Delete(json);
                                 break;
                             }
                         }
@@ -891,9 +916,6 @@ void modem_task(void *arg)
         // clear notify
         ulTaskNotifyTake(pdTRUE, 0);
 
-        // если есть бит END_WORK - то модуль уже выключили из main()
-        // if ((xEventGroupGetBits(status_event_group) & END_WORK) == 0)
-        //{
         // ВЫКЛЮЧАЕМ
 #if !defined NBIOT_PSM
         // если запускаем терминал - стоп работа с модулем
@@ -905,12 +927,6 @@ void modem_task(void *arg)
         if (print_atcmd("AT+CPOWD=1\r\n", data) == ESP_OK)
             strcpy(net_status_current, "Success OFF");
 #endif
-        // print_atcmd("AT+CFUN=0\r\n", data);
-        //}
-        // else
-        //{
-        //    strcpy(net_status_current, "Extern OFF");
-        //}
 
         xEventGroupSetBits(status_event_group, END_RADIO);
     }

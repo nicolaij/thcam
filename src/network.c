@@ -156,7 +156,7 @@ void wifi_init_softap()
 
     static char wifi_name[sizeof(wifi_config.ap.ssid)] = AP_WIFI_SSID;
     int l = strlen(wifi_name);
-    itoa(get_menu_val_by_id("id"), &wifi_name[l], 10);
+    itoa(get_menu_val_by_id("idn"), &wifi_name[l], 10);
 
     strlcpy((char *)wifi_config.ap.ssid, wifi_name, sizeof(wifi_config.ap.ssid));
     wifi_config.ap.ssid_len = strlen(wifi_name);
@@ -312,7 +312,7 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     struct tm *localtm = localtime(&result.ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
     // l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
-    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON, get_menu_val_by_id("id"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
     const esp_app_desc_t *app_ver = esp_app_get_description();
 
@@ -739,7 +739,7 @@ esp_err_t sensor_get_handler(httpd_req_t *req)
     {
         if (httpd_req_get_url_query_str(req, paramstring, buf_len) == ESP_OK)
         {
-            if (httpd_query_key_value(paramstring, "id", param, sizeof(param)) == ESP_OK)
+            if (httpd_query_key_value(paramstring, "idn", param, sizeof(param)) == ESP_OK)
             {
                 ESP_LOGI("http", "Found URL query parameter => id=%s", param);
             };
