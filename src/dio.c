@@ -47,7 +47,7 @@ adc_oneshot_unit_handle_t l_adc_handle;
 #define BLOCKSIZE (50 * SOC_ADC_DIGI_RESULT_BYTES * CHAN)
 #define points (TIME * FREQ / 1000 * CHAN)
 
-uint8_t adcresult[points * sizeof(int)] = {0};
+DMA_ATTR uint8_t adcresult[points * sizeof(int)] = {0};
 int *adcresult32_1 = (int *)adcresult;
 int *adcresult32_2 = (int *)(adcresult + points * sizeof(int));
 

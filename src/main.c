@@ -22,8 +22,6 @@ RTC_DATA_ATTR result_data_t history[HISTORY_SIZE];
 
 EventGroupHandle_t status_event_group;
 
-char buf[40];
-
 int wait_max_counter = 1;
 
 TaskHandle_t xHandleNB = NULL;
@@ -243,48 +241,6 @@ void app_main(void)
     // принудительно заканчиваем работу NBIoT и WiFi
     xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
 
-    // xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
-    // vTaskDelay(1);
-
-    // old_result = result;
-    /*
-        const char *filepath = "/spiffs/" DATAFILE;
-        FILE *fd = NULL;
-        struct stat file_stat = {.st_size = 0};
-
-        int maxfilesize = get_menu_val_by_id("filesize");
-        // Сохраняем файл
-        if (maxfilesize > 0)
-        {
-            if (stat(filepath, &file_stat) == -1)
-            {
-                fd = fopen(filepath, "w");
-                fprintf(fd, "BootCounter, ttime, " OUT_MEASURE_HEADERS "\n");
-                fclose(fd);
-            }
-
-            fd = fopen(filepath, "a+");
-            if (fd)
-            {
-                if (fprintf(fd, "%4i, %10lli, " OUT_MEASURE_FORMATS "\n", bootCount, result.ttime, OUT_MEASURE_VARS(result.measure)) > 0)
-                {
-                    fflush(fd);
-                    ESP_LOGI("main", "Save \"%s\" successful", filepath);
-                }
-                else
-                {
-                    ESP_LOGW("main", "Save \"%s\" error!", filepath);
-                }
-            }
-            fclose(fd);
-        }
-
-        if (maxfilesize > 0 && file_stat.st_size > (maxfilesize * 1024))
-        {
-            remove("/spiffs/old" DATAFILE);
-            rename(filepath, "/spiffs/old" DATAFILE);
-        };
-    */
 #if !defined NBIOT_PSM
     if ((uxBits & END_RADIO) == 0)
     {

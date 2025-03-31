@@ -413,13 +413,13 @@ esp_err_t get_history(httpd_req_t *req)
     int hpos = history_pos + HISTORY_SIZE;
     int hend = history_pos;
 
-    l = snprintf(&network_buf[l], (TRANSFER_SIZE - l), "bootcount, datetime, " OUT_MEASURE_HEADERS "\n");
+    l = snprintf(&network_buf[l], (TRANSFER_SIZE - l), "Datetime, Bootcount, " OUT_MEASURE_HEADERS "\n");
 
     while (hpos > hend)
     {
         int indx = hpos % HISTORY_SIZE;
 
-        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%3u, %s, " OUT_MEASURE_FORMATS "\n", history[indx].measure.bootcount, get_datetime(history[indx].ttime), OUT_MEASURE_VARS(history[indx].measure));
+        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%s, %3u, " OUT_MEASURE_FORMATS "\n", get_datetime(history[indx].ttime), history[indx].measure.bootcount, OUT_MEASURE_VARS(history[indx].measure));
         hpos--;
 
         if ((TRANSFER_SIZE - l) < sizeof(OUT_MEASURE_FORMATS) * 2)

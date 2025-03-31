@@ -365,12 +365,12 @@ void console_task(void *arg)
                         int pos = history_pos + HISTORY_SIZE;
                         int end = history_pos;
                         ESP_LOGI("menu", "-------------------------------------------");
-                        ESP_LOGI("menu", "bootcount, datetime, " OUT_MEASURE_HEADERS);
+                        ESP_LOGI("menu", "Datetime, Bootcount, " OUT_MEASURE_HEADERS);
                         while (pos > end)
                         {
                             int indx = pos % HISTORY_SIZE;
                             
-                            ESP_LOGI("menu", "%3i, %s, " OUT_MEASURE_FORMATS, history[indx].measure.bootcount, get_datetime(history[indx].ttime), OUT_MEASURE_VARS(history[indx].measure));
+                            ESP_LOGI("menu", "%s, %3u, " OUT_MEASURE_FORMATS, get_datetime(history[indx].ttime), history[indx].measure.bootcount, OUT_MEASURE_VARS(history[indx].measure));
                             pos--;
                         }
 
