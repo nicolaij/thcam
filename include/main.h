@@ -90,6 +90,8 @@ bool check_range(int x, int y, int z, int setx, int sety, int setz, int devi);
 
 float get_temperature_sensor();
 
+char *get_datetime(time_t ttime);
+
 typedef struct
 {
     const char id[10];
@@ -146,7 +148,7 @@ typedef struct
             bool reserved16 : 1;
         };
     };
-    int bootcount;
+    unsigned int bootcount;
     float internal_temp;
     float temp;
     float humidity;
@@ -176,9 +178,9 @@ extern result_data_t result;
 
 #define HISTORY_SIZE 100
 extern result_data_t history[HISTORY_SIZE];
-extern int history_pos;
+extern uint8_t history_pos;
 
-extern int bootCount;
+extern unsigned int bootCount;
 extern int wait_max_counter;
 
 #define DATAFILE "data.csv"

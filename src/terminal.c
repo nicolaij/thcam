@@ -369,12 +369,8 @@ void console_task(void *arg)
                         while (pos > end)
                         {
                             int indx = pos % HISTORY_SIZE;
-
-                            char datetime[24];
-                            struct tm *localtm = localtime(&history[indx].ttime);
-                            strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
-
-                            ESP_LOGI("menu", "%3i, %s, " OUT_MEASURE_FORMATS, history[indx].measure.bootcount, datetime, OUT_MEASURE_VARS(history[indx].measure));
+                            
+                            ESP_LOGI("menu", "%3i, %s, " OUT_MEASURE_FORMATS, history[indx].measure.bootcount, get_datetime(history[indx].ttime), OUT_MEASURE_VARS(history[indx].measure));
                             pos--;
                         }
 
@@ -416,11 +412,8 @@ void console_task(void *arg)
                     }
                     else
                     {
-                        char datetime[24];
-                        struct tm *localtm = localtime(&result.ttime);
-                        strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
 
-                        ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+                        ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
                         ESP_LOGI("menu", "-------------------------------------------");
                         int i = 0;

@@ -15,8 +15,8 @@ uint8_t mac[6];
 
 result_data_t result;
 
-RTC_DATA_ATTR int bootCount = 0;
-RTC_DATA_ATTR int history_pos = 0;
+RTC_DATA_ATTR unsigned int bootCount = 0;
+RTC_DATA_ATTR uint8_t history_pos = 0;
 
 RTC_DATA_ATTR result_data_t history[HISTORY_SIZE];
 
@@ -190,9 +190,6 @@ void app_main(void)
     // время ожидания
     int wait = get_menu_val_by_id("waitnb");
 
-    // время сна в мин
-    int sleeptime = get_menu_val_by_id("time");
-
     if (wait == 1000)                 // демонстрационный режим, без сна
         xTaskNotifyGive(xHandleWifi); // включаем WiFi
 
@@ -224,7 +221,7 @@ void app_main(void)
                 pdTRUE,             // BIT_0 & BIT_1 should be cleared before returning.
                 pdFALSE,            // ОБА
                 wait * 60000 / portTICK_PERIOD_MS);
-            
+
             if ((uxBits & (NB_TERMINAL)) == 0)
                 ESP_LOGD("main", "Wait end. uxBits: 0x%lx", uxBits);
 
@@ -254,9 +251,6 @@ void app_main(void)
     // vTaskDelay(1);
 
     // old_result = result;
-
-    history_pos = (history_pos + 1) % HISTORY_SIZE;
-
     /*
         const char *filepath = "/spiffs/" DATAFILE;
         FILE *fd = NULL;
@@ -295,7 +289,7 @@ void app_main(void)
             rename(filepath, "/spiffs/old" DATAFILE);
         };
     */
-#if !defined NBIOT_PSM 
+#if !defined NBIOT_PSM
     if ((uxBits & END_RADIO) == 0)
     {
         // даем время выключиться
@@ -308,6 +302,9 @@ void app_main(void)
         nbiot_power_off();
     };
 #endif
+
+    // время сна в мин
+    int sleeptime = get_menu_val_by_id("time");
 
     // если затопление или засвет - сон короче в 2 раза.
     if ((wake_mask & BIT64(PIN_WATER3)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
@@ -329,7 +326,8 @@ void app_main(void)
         wake_mask = ((BIT64(PIN_BATT) | BIT64(PIN_INT_ACC))); // только зарядка и положение!
     }
 
-    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0)
+    //только если предыдущее и текущее ниже 3-х в
+    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0 && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery < 3.0)
     {
         sleeptime = get_menu_val_by_id("time") * 10;
     }
@@ -346,7 +344,11 @@ void app_main(void)
 
     dio_sleep(wake_mask);
 
-    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, "", OUT_MEASURE_VARS(result.measure));
+    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+
+    //store only changes 
+    if (history[history_pos].measure.flags != history[(history_pos - 1) % HISTORY_SIZE].measure.flags || history[history_pos].measure.flags != history[(history_pos - 2) % HISTORY_SIZE].measure.flags)
+        history_pos = (history_pos + 1) % HISTORY_SIZE;
 
     // если зарядка - сон 5 мин.
     // if (result.measure.d_charge || get_charge())

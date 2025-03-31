@@ -408,7 +408,7 @@ esp_err_t get_history(httpd_req_t *req)
     int l = 0;
     reset_sleep_timeout();
 
-    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_type(req, "text/csv");
     httpd_resp_set_hdr(req, "Connection", "close");
 
     network_buf[0] = '\0';
