@@ -308,11 +308,8 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     reset_sleep_timeout();
 
     int l = 0;
-    char datetime[24];
-    struct tm *localtm = localtime(&result.ttime);
-    strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
-    // l += snprintf(&buf[l], CONFIG_LWIP_TCP_MSS - l, " CURRENT DATA = ");
-    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
+
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
     const esp_app_desc_t *app_ver = esp_app_get_description();
 
@@ -422,11 +419,7 @@ esp_err_t get_history(httpd_req_t *req)
     {
         int indx = hpos % HISTORY_SIZE;
 
-        char datetime[24];
-        struct tm *localtm = localtime(&history[indx].ttime);
-        strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
-
-        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%3i, %s, " OUT_MEASURE_FORMATS "\n", history[indx].measure.bootcount, datetime, OUT_MEASURE_VARS(history[indx].measure));
+        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%3u, %s, " OUT_MEASURE_FORMATS "\n", history[indx].measure.bootcount, get_datetime(history[indx].ttime), OUT_MEASURE_VARS(history[indx].measure));
         hpos--;
 
         if ((TRANSFER_SIZE - l) < sizeof(OUT_MEASURE_FORMATS) * 2)

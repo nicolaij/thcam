@@ -124,11 +124,7 @@ void app_main(void)
     // Light, Water
     uint64_t wake_mask = dio_init() | (BIT64(PIN_BATT) | BIT64(PIN_INT_ACC));
 
-    time_t n = time(0);
-    struct tm *localtm = localtime(&n);
-    strftime((char *)buf, sizeof(buf), "%Y-%m-%d %T", localtm);
-
-    ESP_LOGI("main", "Current date/time: %s", buf);
+    ESP_LOGI("main", "Current date/time: %s", get_datetime(time(0)));
 
     esp_efuse_mac_get_default(mac);
     ESP_LOGI("main", "mac: %02x-%02x-%02x-%02x-%02x-%02x", mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);

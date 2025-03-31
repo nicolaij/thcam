@@ -58,7 +58,6 @@ extern TaskHandle_t xHandleWifi;
 extern TaskHandle_t xTaskI2C;
 
 void modem_task(void *arg);
-void led_task(void *arg);
 void console_task(void *arg);
 void btn_task(void *arg);
 void wifi_task(void *arg);
@@ -78,7 +77,6 @@ uint64_t dio_sleep(uint64_t wake_mask);
 int get_charge();
 
 void nbiot_power_pin(const TickType_t xTicksToDelay);
-void nbiot_power_off();
 
 esp_err_t print_atcmd(const char *cmd, char *buffer);
 
@@ -169,12 +167,12 @@ typedef struct
 
 extern result_data_t result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"RSSI\":%.0f,\"Battery\":%.3f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"Flags\":\"0x%04X\"}"
-#define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2], prefix.flags
-#define OUT_MEASURE_VARS(prefix) prefix.rssi, prefix.nbbattery, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, OUT_MEASURE_ACC_VARS(prefix)
-#define OUT_MEASURE_HEADERS "RSSI, Battery, Light, Water, WaterTemp, Temp, Humidity, AccX, AccY, AccZ, MagX, MagY, MagZ, Flags"
-#define OUT_MEASURE_ACC_FORMATS "%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, 0x%04X"
-#define OUT_MEASURE_FORMATS "%2.0f, %.3f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, "OUT_MEASURE_ACC_FORMATS
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\",\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f]}"
+#define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2]
+#define OUT_MEASURE_VARS(prefix) prefix.nbbattery, prefix.rssi, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.flags, OUT_MEASURE_ACC_VARS(prefix)
+#define OUT_MEASURE_HEADERS "Battery, RSSI, Light, Water, WaterTemp, Temp, Humidity, Flags, AccX, AccY, AccZ, MagX, MagY, MagZ"
+#define OUT_MEASURE_ACC_FORMATS "%.2f, %.2f, %.2f, %.2f, %.2f, %.2f"
+#define OUT_MEASURE_FORMATS "%.3f, %2.0f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, 0x%04X, "OUT_MEASURE_ACC_FORMATS
 
 #define HISTORY_SIZE 100
 extern result_data_t history[HISTORY_SIZE];

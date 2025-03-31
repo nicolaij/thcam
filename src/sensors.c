@@ -58,8 +58,8 @@ float get_temperature_sensor()
 
 int compare_function(const void *a, const void *b)
 {
-    int *x = (int *)a;
-    int *y = (int *)b;
+    const int *x = a;
+    const int *y = b;
     return *x - *y;
 }
 
@@ -181,10 +181,10 @@ void i2c_task(void *arg)
         uint32_t ulNotifiedValue;
 
         /* Ожидание оповещения. */
-        BaseType_t xResult = xTaskNotifyWait(pdFALSE,                                                                                 /* Не очищать биты на входе. */
-                                             ULONG_MAX & ~(NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT | NOTYFY_TEST), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
-                                             &ulNotifiedValue,                                                                        /* Сохраняет значение оповещения. */
-                                             tm);
+        xTaskNotifyWait(pdFALSE,                                                                                 /* Не очищать биты на входе. */
+                        ULONG_MAX & ~(NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT | NOTYFY_TEST), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
+                        &ulNotifiedValue,                                                                        /* Сохраняет значение оповещения. */
+                        tm);
 
         if ((ulNotifiedValue & NOTYFY_SENSOR_TH) && result.measure.d_thsensor_error == false)
         {
@@ -431,7 +431,7 @@ void i2c_task(void *arg)
             int data[] = {abs(x), abs(y), abs(z)};
             qsort(data, 3, sizeof(int), compare_function);
 
-            //ESP_LOGD("LSM303", "sort=%d %d %d", data[0], data[1], data[2]);
+            // ESP_LOGD("LSM303", "sort=%d %d %d", data[0], data[1], data[2]);
 
             // берем больший промежуток
             int avg = 0;
@@ -440,7 +440,7 @@ void i2c_task(void *arg)
             else
                 avg = (data[1] + data[0]) / 2;
 
-            //ESP_LOGD("LSM303", "avg ACC=%d", avg);
+            // ESP_LOGD("LSM303", "avg ACC=%d", avg);
 
             uint8_t int_mask = BIT(LSM303DLHC_INT1_XLIE_XDOWNE_BIT) | BIT(LSM303DLHC_INT1_XHIE_XUPE_BIT) | BIT(LSM303DLHC_INT1_YLIE_YDOWNE_BIT) | BIT(LSM303DLHC_INT1_YHIE_YUPE_BIT) | BIT(LSM303DLHC_INT1_ZLIE_ZDOWNE_BIT) | BIT(LSM303DLHC_INT1_ZHIE_ZUPE_BIT);
 

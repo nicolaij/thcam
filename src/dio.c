@@ -202,7 +202,6 @@ static void water_continuous_adc_init()
     adc_pattern[num].channel = PIN_WATER2;
     adc_pattern[num].unit = ADC_UNIT_1;
     adc_pattern[num].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
-    num++;
 
     dig_cfg.pattern_num = CHAN;
 
@@ -613,55 +612,6 @@ uint64_t dio_sleep(uint64_t wake_mask)
     ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_HIGH));
 
     return wake_mask;
-}
-
-void led_task(void *arg)
-{
-    led_task_data_t data;
-    TickType_t delay_time = portMAX_DELAY;
-
-    led_strip_handle_t led_strip = NULL;
-
-    // LED strip general initialization, according to your led board design
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = GPIO_NUM_8,             // The GPIO that connected to the LED strip's data line
-        .max_leds = 1,                            // The number of LEDs in the strip,
-        .led_pixel_format = LED_PIXEL_FORMAT_GRB, // Pixel format of your LED strip
-        .led_model = LED_MODEL_SK6812,            // LED strip model
-        .flags.invert_out = false,                // whether to invert the output signal
-    };
-
-    led_strip_rmt_config_t rmt_config = {
-        .resolution_hz = 10 * 1000 * 1000, // 10MHz
-        .flags.with_dma = false,
-    };
-
-    while (1)
-    {
-        if (xQueueReceive(xQueueLed, &(data), delay_time) == pdPASS)
-        {
-            if (led_strip == NULL)
-            {
-                ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
-            }
-
-            if (data.xTicksToDelay > 0)
-            {
-                ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, 0, data.red, data.green, data.blue));
-                ESP_ERROR_CHECK(led_strip_refresh(led_strip));
-            }
-            delay_time = data.xTicksToDelay;
-        }
-        else
-        {
-            ESP_ERROR_CHECK(led_strip_clear(led_strip));
-            delay_time = portMAX_DELAY;
-            if (data.xTicksToDelay > 0)
-            {
-                ESP_ERROR_CHECK(led_strip_del(led_strip));
-            }
-        }
-    }
 }
 
 void btn_task(void *arg)

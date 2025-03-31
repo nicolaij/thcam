@@ -17,7 +17,7 @@ static const char *TAG = "NBIoT";
 char pdp_ip[20];
 char net_status_current[32];
 
-RTC_DATA_ATTR bool run_first = false;
+RTC_DATA_ATTR bool first_run_completed = false;
 
 unsigned int fromActiveTime(uint8_t val)
 {
@@ -217,7 +217,7 @@ esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *res
         }
     }
 
-    return ESP_OK;
+    return res;
 }
 
 /*
@@ -251,7 +251,7 @@ esp_err_t at_csosend(int socket, char *data, char *buffer)
             return ESP_ERR_INVALID_SIZE;
         }
     }
-    txBytes = uart_write_bytes(UART_NUM_1, "\r", 1);
+    uart_write_bytes(UART_NUM_1, "\r", 1);
 
     res = wait_OK(buffer, 30000 / portTICK_PERIOD_MS);
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
@@ -288,7 +288,7 @@ esp_err_t at_csosend_wait_SEND(int socket, char *data, char *buffer)
             return ESP_ERR_INVALID_SIZE;
         }
     }
-    txBytes = uart_write_bytes(UART_NUM_1, "\r", 1);
+    uart_write_bytes(UART_NUM_1, "\r", 1);
 
     res = wait_string(buffer, "SEND:", 30000 / portTICK_PERIOD_MS);
 
@@ -300,8 +300,6 @@ esp_err_t at_csosend_wait_SEND(int socket, char *data, char *buffer)
 char *get_datetime(time_t ttime)
 {
     static char datetime[24];
-    if (ttime == 0)
-        ttime = time(0);
     struct tm *localtm = localtime(&ttime);
     strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
     return datetime;
@@ -375,10 +373,11 @@ void modem_task(void *arg)
                     break;
 
 #ifdef NBIOT_PSM
-                if (d_nbiot_error_counter < 3)
+                if (d_nbiot_error_counter < 4)
                 {
-                    if (d_nbiot_error_counter == 1)
+                    if (d_nbiot_error_counter == 2)
                     {
+                        // power off
                         nbiot_power_pin(2000 / portTICK_PERIOD_MS);
                         vTaskDelay(3000 / portTICK_PERIOD_MS);
                     }
@@ -455,7 +454,7 @@ void modem_task(void *arg)
                 if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
                 {
                     at_reply_wait_OK("AT+CPSMS=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                    run_first = true;
+                    first_run_completed = true;
                     vTaskDelay(25000 / portTICK_PERIOD_MS);
                 }
 
@@ -504,7 +503,7 @@ void modem_task(void *arg)
             strcpy(net_status_current, "Network search...");
 
 #ifdef NBIOT_PSM
-            if (run_first == false)
+            if (first_run_completed == false)
             {
                 at_reply_wait_OK("AT+CEREG=5\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
             }
@@ -525,6 +524,11 @@ void modem_task(void *arg)
                 }
                 else
                 {
+                    if (creg[0] != 5) //Исправится следующий раз
+                    {
+                        first_run_completed = false;
+                    }
+
                     if (creg[1] == 1) // 1 Registered, home network.
                     {
                         char bf[10];
@@ -537,6 +541,7 @@ void modem_task(void *arg)
                     }
                     vTaskDelay(1000 / portTICK_PERIOD_MS);
                 }
+
                 try_network--;
 
                 // если запускаем терминал - стоп работа с модулем
@@ -592,12 +597,12 @@ void modem_task(void *arg)
             }
 
             // Clock
-            if (run_first == false)
+            if (first_run_completed == false)
             {
                 // AT+CURTC? AT+CTZR?
                 // ee = at_reply_wait_OK("AT+CTZR=?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                ee = at_reply_wait_OK("AT+CURTC=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS); // CCLK show UTC time after network time synchronization
-                ee = at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);  // Automatic time update via NITZ
+                at_reply_wait_OK("AT+CURTC=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS); // CCLK show UTC time after network time synchronization
+                at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);  // Automatic time update via NITZ
 
 #ifdef NBIOT_PSM
                 at_reply_wait_OK("AT+CPSMSTATUS=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
@@ -610,7 +615,7 @@ void modem_task(void *arg)
                 // at_reply_wait_OK("AT+CSOC=1,2,1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 #endif
 
-                run_first = true;
+                first_run_completed = true;
             }
 
             ee = at_reply_wait_OK("AT+CCLK?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
@@ -690,8 +695,7 @@ void modem_task(void *arg)
                 time_t t = mktime(&tm) + dt[6] * 3600; // UNIX time + timezone offset
                 struct timeval now = {.tv_sec = t};
                 settimeofday(&now, NULL);
-                // strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", &tm);
-                ESP_LOGI(TAG, "Set date and time: %s", get_datetime(0));
+                ESP_LOGI(TAG, "Set date and time: %s", get_datetime(t));
             }
 
             // get current date time
@@ -709,7 +713,7 @@ void modem_task(void *arg)
             else
             {
                 const char *pdata = strstr((const char *)data, "IPCONFIG:");
-                char *s = strchr(pdata, ' ');
+                const char *s = strchr(pdata, ' ');
                 if (s)
                 {
                     char *s_end = strchr(s, '\r');
@@ -726,7 +730,7 @@ void modem_task(void *arg)
                 {
                     ESP_LOGE(TAG, "IP: %s", pdp_ip);
                     print_atcmd("AT+CPOWD=1\r\n", data);
-                    run_first = false;
+                    first_run_completed = false;
                     vTaskDelay(2000 / portTICK_PERIOD_MS);
                     continue;
                 }
@@ -808,22 +812,10 @@ void modem_task(void *arg)
                     {
                         ESP_LOGW(TAG, "AT+CSOCON:%s", data);
                         result.measure.d_nbiot_error = true;
-                        /* ping
-                            // AT+CIPPING
-                            snprintf(send_data, sizeof(send_data), "AT+CIPPING=\"%i.%i.%i.%i\"\r\n", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip) & 0xff);
-                            ee = at_reply_wait(send_data, "CIPPING", (char *)data, 40000 / portTICK_PERIOD_MS);
-                            if (ee != ESP_OK)
-                            {
-                                ESP_LOGW(TAG, "AT+CIPPING:%s", data);
-                                vTaskDelay(3000 / portTICK_PERIOD_MS);
-                            }
-                        */
                     }
                     else
                     {
                         result.measure.d_nbiot_error = false;
-                        // ESP_LOGI(TAG, "AT+CSOCON:%s", data);
-                        // snprintf(send_data, sizeof(send_data), "{\"id\":\"cam%d\",\"num\":%d,\"dt\":\"%s\",\"rssi\":%d,\"NBbatt\":%d,\"batt\":%.2f,\"adclight\":%.0f,\"adcwater\":%.0f,\"adcwater2\":%.0f,\"cputemp\":%.1f,\"temp\":%.1f,\"humidity\":%.1f,\"pressure\":%.3f}", get_menu_id("idn"), result.bootCount, datetime, csq[0] * 2 + -113, cbc[1], result.measure.battery, result.measure.light, result.measure.water, result.measure.water2, result.measure.internal_temp, result.measure.temp, result.measure.humidity, result.measure.pressure);
                         snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
                         ESP_LOGI(TAG, "Send...");
@@ -836,9 +828,6 @@ void modem_task(void *arg)
 
                         if (ee == ESP_OK)
                         {
-                            // print_atcmd("AT+CSOACK\r\n", (char *)data);
-                            // vTaskDelay(2000 / portTICK_PERIOD_MS);
-
                             result.measure.d_nbiot_send_succes = true;
                             break;
                         }
@@ -848,14 +837,14 @@ void modem_task(void *arg)
                     vTaskDelay(2000 / portTICK_PERIOD_MS);
                     try_counter--;
                 }
-                
-                //если текущая и предыдущая попытка передачи неудачны - выключаем модем
-                if (result.measure.d_nbiot_send_succes == false && history[(history_pos - 1) % HISTORY_SIZE].measure.d_nbiot_send_succes == false)
-                {
-                    print_atcmd("AT+CPOWD=1\r\n", data);
-                    run_first = false;
-                    vTaskDelay(2000 / portTICK_PERIOD_MS);
-                };
+            };
+
+            // если текущая и предыдущая попытка передачи неудачны - выключаем модем
+            if (result.measure.d_nbiot_send_succes == false && history[(history_pos - 1) % HISTORY_SIZE].measure.d_nbiot_send_succes == false)
+            {
+                print_atcmd("AT+CPOWD=1\r\n", data);
+                first_run_completed = false;
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
             };
 
             // wait 10s for reply from server
@@ -943,10 +932,4 @@ void nbiot_power_pin(const TickType_t xTicksToDelay)
     gpio_set_level(MODEM_POWER, 0);
     vTaskDelay(xTicksToDelay);
     gpio_set_level(MODEM_POWER, 1);
-};
-
-void nbiot_power_off()
-{
-    ESP_LOGW("main", "Force power off NB-IoT");
-    nbiot_power_pin(2000 / portTICK_PERIOD_MS);
 };
