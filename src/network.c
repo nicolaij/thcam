@@ -1,10 +1,5 @@
-/* WiFi station Example
+/*
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
 */
 #include "main.h"
 
@@ -30,18 +25,11 @@ extern char pdp_ip[20];
 extern char net_status_current[32];
 
 #define CLIENT_WIFI_SSID "ap1"
-#define CLIENT_WIFI_PASS "123123123"
-#define AP_WIFI_SSID "THCam"
-#define AP_WIFI_PASS "123123123"
-
-#define EXAMPLE_MAX_STA_CONN 2
+#define CLIENT_WIFI_PASS ""
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 
-/* The event group allows multiple bits for each event, but we only care about two events:
- * - we are connected to the AP with an IP
- * - we failed to connect after the maximum amount of retries */
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
 
@@ -67,8 +55,6 @@ size_t buf_len;
 int64_t timeout_begin;
 
 bool need_ws_send = false;
-
-bool restart = false;
 
 typedef struct
 {
@@ -126,11 +112,9 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
     }
 }
 
-void wifi_init_softap()
+void wifi_init_softap(uint8_t channel, uint8_t ssid_hidden)
 {
-
     esp_netif_create_default_wifi_ap();
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
@@ -143,9 +127,10 @@ void wifi_init_softap()
         .ap = {
             .ssid = AP_WIFI_SSID,
             .ssid_len = strlen(AP_WIFI_SSID),
-            .channel = 1,
+            .ssid_hidden = ssid_hidden,
+            .channel = channel,
             .password = AP_WIFI_PASS,
-            .max_connection = EXAMPLE_MAX_STA_CONN,
+            .max_connection = 3,
             .authmode = WIFI_AUTH_WPA_WPA2_PSK},
     };
 
@@ -161,6 +146,7 @@ void wifi_init_softap()
     strlcpy((char *)wifi_config.ap.ssid, wifi_name, sizeof(wifi_config.ap.ssid));
     wifi_config.ap.ssid_len = strlen(wifi_name);
 
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_AP, WIFI_BW_HT20)); // иначе не работает 11 канал
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -272,6 +258,11 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     if (filepath[l - 3] == '.' && filepath[l - 2] == 'g' && filepath[l - 1] == 'z')
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
 
+    // const esp_app_desc_t *app_ver = esp_app_get_description();
+
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=604800");
+    httpd_resp_set_hdr(req, "ETag", app_elf_sha256_str);
+
     ESP_LOGI(TAGH, "Sending file : %s (%ld bytes)...", filepath, file_stat.st_size);
 
     size_t chunksize;
@@ -313,7 +304,7 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
 
     const esp_app_desc_t *app_ver = esp_app_get_description();
 
-    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "<br>Firmware: %s (%s)", app_ver->version, app_ver->date);
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "<br>Firmware: %s (%s) MAC:" MACSTR, app_ver->version, app_ver->date, MAC2STR(mac));
 
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", STATUS: ");
 
@@ -600,8 +591,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
 
         httpd_resp_sendstr(req, "Firmware update complete, rebooting now!\n");
         ESP_LOGW(TAGH, "Firmware update complete, rebooting now!");
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-        restart = true;
+        xEventGroupSetBits(status_event_group, REBOOT_NOW);
     }
     else if (file_id == 0x80000)
     {
@@ -623,8 +613,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
 
         httpd_resp_sendstr(req, "SPIFFS update complete, rebooting now!\n");
         ESP_LOGW(TAGH, "SPIFFS update complete, rebooting now!");
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-        restart = true;
+        xEventGroupSetBits(status_event_group, REBOOT_NOW);
     }
 
     return ESP_OK;
@@ -647,7 +636,7 @@ esp_err_t ws_send_acc_data(httpd_req_t *req)
     static httpd_ws_frame_t ws_pkt;
     static char accbuf[48];
     // ws_pkt.len = sprintf(accbuf, "%.2f %.2f %.2f;%.2f %.2f %.2f;0x%04X", result.measure.acc[0], result.measure.acc[1], result.measure.acc[2], result.measure.mag[0], result.measure.mag[1], result.measure.mag[2], result.measure.flags);
-    ws_pkt.len = sprintf(accbuf, OUT_MEASURE_ACC_FORMATS, OUT_MEASURE_ACC_VARS(result.measure));
+    ws_pkt.len = snprintf(accbuf, sizeof(accbuf), OUT_MEASURE_ACC_FORMATS ",0x%04X", OUT_MEASURE_ACC_VARS(result.measure), result.measure.flags);
     ws_pkt.payload = (uint8_t *)accbuf;
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
     if (req)
@@ -660,7 +649,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET)
     {
-        ESP_LOGI(TAGH, "Handshake done, the new connection was opened");
+        ESP_LOGI(TAGH, "WS handshake done, the new connection was opened");
         return ESP_OK;
     }
     httpd_ws_frame_t ws_pkt;
@@ -847,7 +836,7 @@ static httpd_handle_t start_webserver(void)
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     // config.max_open_sockets = 5;
-    // config.stack_size = 1024 * 10;
+    config.stack_size = 1024 * 8;
     config.lru_purge_enable = true;
     // config.send_wait_timeout = 30;
     // config.recv_wait_timeout = 30;
@@ -888,50 +877,92 @@ static httpd_handle_t start_webserver(void)
 
 void wifi_task(void *arg)
 {
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Ожидаем уведомления безконечно, для запуска WiFi
-
-    xEventGroupClearBits(status_event_group, END_WIFI);
+    uint32_t ulNotifiedValue;
+    /* Ожидание оповещения безконечно, для запуска WiFi. */
+    xTaskNotifyWait(pdFALSE,          /* Не очищать биты на входе. */
+                    ULONG_MAX,        /* Очистка всех бит на выходе. */
+                    &ulNotifiedValue, /* Сохраняет значение оповещения. */
+                    portMAX_DELAY);
 
     s_wifi_event_group = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    wifi_init_softap(); // WiFi channel
-
-    /* Start the server for the first time */
-    start_webserver();
-
-    /* Mark current app as valid */
-    const esp_partition_t *partition = esp_ota_get_running_partition();
-    // printf("Currently running partition: %s\r\n", partition->label);
-    ESP_LOGI(TAGW, "Currently running partition: %s", partition->label);
-
-    esp_ota_img_states_t ota_state;
-    if (esp_ota_get_state_partition(partition, &ota_state) == ESP_OK)
+    if ((ulNotifiedValue & NOTYFY_WIFI_ESPNOW) != 0)
     {
-        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY)
-        {
-            esp_ota_mark_app_valid_cancel_rollback();
-        }
+        wifi_init_softap(WIFI_CHANNEL, 1);
     }
+    else
+    {
+        wifi_init_softap(WIFI_CHANNEL, 0); // WiFi
 
-    reset_sleep_timeout();
+        ESP_LOGI("SPIFFS", "Initializing SPIFFS");
+        esp_vfs_spiffs_conf_t spiffsconf = {
+            .base_path = "/spiffs",
+            .partition_label = NULL,
+            .max_files = 5,
+            .format_if_mount_failed = true};
+
+        // Use settings defined above to initialize and mount SPIFFS filesystem.
+        // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
+        esp_err_t ret = esp_vfs_spiffs_register(&spiffsconf);
+
+        if (ret != ESP_OK)
+        {
+            if (ret == ESP_FAIL)
+            {
+                ESP_LOGE("SPIFFS", "Failed to mount or format filesystem");
+            }
+            else if (ret == ESP_ERR_NOT_FOUND)
+            {
+                ESP_LOGE("SPIFFS", "Failed to find SPIFFS partition");
+            }
+            else
+            {
+                ESP_LOGE("SPIFFS", "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+            }
+        }
+
+        size_t total = 0, used = 0;
+        ret = esp_spiffs_info(spiffsconf.partition_label, &total, &used);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE("SPIFFS", "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+        }
+        else
+        {
+            ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
+        }
+
+        /* Start the server for the first time */
+        start_webserver();
+
+        /* Mark current app as valid */
+        const esp_partition_t *partition = esp_ota_get_running_partition();
+        // printf("Currently running partition: %s\r\n", partition->label);
+        ESP_LOGI(TAGW, "Currently running partition: %s", partition->label);
+
+        esp_ota_img_states_t ota_state;
+        if (esp_ota_get_state_partition(partition, &ota_state) == ESP_OK)
+        {
+            if (ota_state == ESP_OTA_IMG_PENDING_VERIFY)
+            {
+                esp_ota_mark_app_valid_cancel_rollback();
+            }
+        }
+
+        reset_sleep_timeout();
+    };
 
     while (1)
     {
-        // WiFi timeout
-        // if (esp_timer_get_time() - timeout_begin > 6 * 60 * 1000000)
-        //{
-        //    xEventGroupSetBits(status_event_group, WIFI_STOP);
-        //}
-
         EventBits_t uxBits = xEventGroupWaitBits(
-            status_event_group, //* The event group being tested.
-            READ_MAG_SENSOR,    //* The bits within the event group to wait for.
-            pdTRUE,             //* BIT_0 & BIT_1 should be cleared before returning.
-            pdFALSE,            //* ОБА
-            100 / portTICK_PERIOD_MS);
+            status_event_group,                           //* The event group being tested.
+            READ_MAG_SENSOR | END_WORK_WIFI | REBOOT_NOW, //* The bits within the event group to wait for.
+            pdTRUE,                                       //* BIT_0 & BIT_1 should be cleared before returning.
+            pdFALSE,                                      //* ОБА
+            portMAX_DELAY);
 
         if ((uxBits & READ_MAG_SENSOR) && async_resp_arg.fd > 0)
         {
@@ -941,19 +972,18 @@ void wifi_task(void *arg)
             };
         }
 
-        if (uxBits & END_WORK_NBIOT)
+        if (uxBits & END_WORK_WIFI)
         {
             esp_wifi_stop();
-            xEventGroupSetBits(status_event_group, END_WIFI);
+            esp_wifi_deinit();
         }
 
-        if (restart == true)
+        if (uxBits & REBOOT_NOW)
         {
             vTaskDelay(1000 / portTICK_PERIOD_MS);
             esp_wifi_stop();
+            esp_wifi_deinit();
             esp_restart();
         }
-
-        // vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }

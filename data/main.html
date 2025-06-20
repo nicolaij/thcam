@@ -313,18 +313,23 @@
         return 0;
       }
 
-      function calculateAngles(acX, acY, acZ) {
-        angleX = Math.atan2(acX, Math.sqrt(acY * acY + acZ * acZ)) * (180 / Math.PI);
-        angleY = Math.atan2(acY, Math.sqrt(acX * acX + acZ * acZ)) * (180 / Math.PI) * -1;
-        angleZ = Math.atan2(Math.sqrt(acX * acX + acY * acY), acZ) * (180 / Math.PI);
+      function calculateAngles(x, y, z) {
+        // Нормализуем значения (на случай, если они немного выходят за пределы -1..1)
+        const nx = Math.min(Math.max(x, -1), 1);
+        const ny = Math.min(Math.max(y, -1), 1);
+        const nz = Math.min(Math.max(z, -1), 1);
 
-        //console.log("angles x:" + angleX + "; y:" + angleY + "; z:" + angleZ);
-        console.log("rotateX(" + angleX + "deg) rotateY(" + angleY + "deg) rotateZ(" + angleZ + "deg)");
+        // Вычисляем углы вращения
+        let rotateX = 0, rotateY = 0, rotateZ = 0;
 
-        //document.getElementById("cube").style.transform = "rotateX(" + (angleX) + "deg) rotateY(" + (angleY) + "deg) rotateZ(" + angleZ + "deg)";
-        document.getElementById("cube").style.transform = "rotateX(" + angleY + "deg) rotateZ(" + angleX + "deg)";
+        rotateX = Math.atan2(ny, Math.sqrt(nx * nx + nz * nz)) * (-180 / Math.PI);
+        //rotateY = Math.atan2(Math.sqrt(nx * nx + ny * ny), nz) * (180 / Math.PI);
+        rotateZ = Math.atan2(nx, Math.sqrt(ny * ny + nz * nz)) * (180 / Math.PI);
 
-        return { angleX, angleY, angleZ };
+        // Применяем преобразования к элементу
+        document.getElementById("cube").style.transform = "rotateX(" + rotateX + "deg) rotateY(" + rotateY + "deg) rotateZ(" + rotateZ + "deg)";
+
+        return { rotateX, rotateY, rotateZ };
       }
 
       socket.onmessage = function (e) {
@@ -355,7 +360,9 @@
 
       function ready() {
         fetch("/menu")
-          .then((response) => { return response.text()})
+          .then((response) => {
+            return response.text();
+          })
           .then((data) => {
             document.getElementById("settingscontent").innerHTML = data;
             if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
@@ -367,16 +374,18 @@
             if (use == "acc") document.getElementById("useacc").checked = true;
 
             document.getElementById("ip").value = num2string(document.getElementById("ip").value);
-        })
-        
+          });
+
         fetch("/history")
-          .then((response) => { return response.text()})
+          .then((response) => {
+            return response.text();
+          })
           .then((data) => {
-            data = "<table><tr><td>" + data.replace(/,/g,"</td><td>");
+            data = "<table><tr><td>" + data.replace(/,/g, "</td><td>");
             data = data.replace(/(?:\r\n|\r|\n)/g, "</td></tr><tr><td>") + "</td></tr></table>";
             document.getElementById("filecontent").innerHTML = data;
-        })
-      };
+          });
+      }
 
       document.addEventListener("DOMContentLoaded", ready);
 
@@ -452,6 +461,8 @@
       function string2num(ip) {
         return ip.split(".").reduce((sum, x, i) => sum + (x << (8 * (3 - i))), 0);
       }
+
+      //document.getElementById("cube").style.transform = "rotateX(-90deg) rotateY(-90deg) rotateZ(0deg)";
     </script>
   </body>
 </html>

@@ -1,8 +1,5 @@
 #include "main.h"
 
-#include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-
 #include "onewire_bus.h"
 #include "ds18b20.h"
 
@@ -203,7 +200,7 @@ void i2c_task(void *arg)
 
                 if (err_rc == ESP_OK)
                 {
-                    if ((buffer[1] & 0b10) == 0) // Status (‘0’: temperature, ‘1’: humidity)
+                    if ((buffer[1] & 0b11) == 0) // Status (‘0’: temperature, ‘1’: humidity)
                     {
                         result.measure.temp = -46.85 + 175.72 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
                     }
@@ -215,7 +212,7 @@ void i2c_task(void *arg)
                 err_rc = i2c_master_receive(th_handle, buffer, 3, 10);
                 if (err_rc == ESP_OK)
                 {
-                    if ((buffer[1] & 0b10) != 0) // Status (‘0’: temperature, ‘1’: humidity)
+                    if ((buffer[1] & 0b11) == 0b10) // Status (‘0’: temperature, ‘1’: humidity)
                     {
                         result.measure.humidity = -6.0 + 125.0 * (int)((buffer[0] << 8) | (buffer[1] & 0b11111100)) / 65536.0;
                     }

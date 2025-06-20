@@ -1,6 +1,5 @@
 #include "main.h"
 
-#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_sleep.h"
@@ -33,8 +32,6 @@ void app_main(void)
 {
 
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-
-    status_event_group = xEventGroupCreate();
 
     switch (wakeup_reason)
     {
@@ -102,8 +99,9 @@ void app_main(void)
     bootCount++;
     //  "Количество загрузок: "
     ESP_LOGI("main", "Boot number: %d", bootCount);
-
     ESP_LOGI("main", "Free Heap: %u bytes", xPortGetFreeHeapSize());
+
+    status_event_group = xEventGroupCreate();
 
     init_nvs();
     read_nvs_menu();
@@ -124,55 +122,17 @@ void app_main(void)
 
     ESP_LOGI("main", "Current date/time: %s", get_datetime(time(0)));
 
-    esp_efuse_mac_get_default(mac);
-    ESP_LOGI("main", "mac: %02x-%02x-%02x-%02x-%02x-%02x", mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
+    ESP_LOGI("MAC", "Local AP address " MACSTR, MAC2STR(mac));
 
-    ESP_LOGI("SPIFFS", "Initializing SPIFFS");
-    esp_vfs_spiffs_conf_t spiffsconf = {
-        .base_path = "/spiffs",
-        .partition_label = NULL,
-        .max_files = 5,
-        .format_if_mount_failed = true};
+    xTaskCreate(wifi_task, "wifi_task", 1024 * 4, NULL, configMAX_PRIORITIES - 5, &xHandleWifi);
 
-    // Use settings defined above to initialize and mount SPIFFS filesystem.
-    // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
-    esp_err_t ret = esp_vfs_spiffs_register(&spiffsconf);
-
-    if (ret != ESP_OK)
-    {
-        if (ret == ESP_FAIL)
-        {
-            ESP_LOGE("SPIFFS", "Failed to mount or format filesystem");
-        }
-        else if (ret == ESP_ERR_NOT_FOUND)
-        {
-            ESP_LOGE("SPIFFS", "Failed to find SPIFFS partition");
-        }
-        else
-        {
-            ESP_LOGE("SPIFFS", "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
-        }
-    }
-
-    size_t total = 0, used = 0;
-    ret = esp_spiffs_info(spiffsconf.partition_label, &total, &used);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE("SPIFFS", "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
-    }
-    else
-    {
-        ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
-    }
-
-    xTaskCreate(modem_task, "modem_task", 1024 * 10, NULL, configMAX_PRIORITIES - 10, &xHandleNB);
+    xTaskCreate(modem_task, "modem_task", 1024 * 6, NULL, configMAX_PRIORITIES - 10, &xHandleNB);
     xTaskNotifyGive(xHandleNB); // включаем NBIoT модуль
 
     xTaskCreate(btn_task, "btn_task", 1024 * 4, NULL, configMAX_PRIORITIES - 15, NULL);
 
     xTaskCreate(console_task, "console_task", 1024 * 10, NULL, configMAX_PRIORITIES - 15, NULL);
-
-    xTaskCreate(wifi_task, "wifi_task", 1024 * 4, NULL, configMAX_PRIORITIES - 5, &xHandleWifi);
 
     if (result.measure.d_charge || get_charge()) // проснулись от зарядки
     {
@@ -184,8 +144,9 @@ void app_main(void)
     // время ожидания
     int wait = get_menu_val_by_id("waitnb");
 
-    if (wait == 1000)                 // демонстрационный режим, без сна
-        xTaskNotifyGive(xHandleWifi); // включаем WiFi
+    if (wait == 1000) // демонстрационный режим, без сна
+        if (xHandleWifi)
+            xTaskNotifyGive(xHandleWifi); // включаем WiFi
 
     const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE | TEST_MODE_UPDATED;
 
@@ -200,7 +161,8 @@ void app_main(void)
 
     if (get_charge()) // идет зарядка
     {
-        xTaskNotifyGive(xHandleWifi); // включаем WiFi
+        if (xHandleWifi)
+            xTaskNotifyGive(xHandleWifi); // включаем WiFi
     };
 
     if (!((uxBits & END_RADIO) != 0 && (uxBits & (nowake)) == 0))
@@ -239,22 +201,9 @@ void app_main(void)
     }
 
     // принудительно заканчиваем работу NBIoT и WiFi
-    xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
-
-#if !defined NBIOT_PSM
-    if ((uxBits & END_RADIO) == 0)
-    {
-        // даем время выключиться
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-    }
-
-    if ((uxBits & END_RADIO) == 0)
-    {
-        // если модуль nbiot не выключился - то выключаем принудительно
-        nbiot_power_off();
-    };
-#endif
-
+    xEventGroupSetBits(status_event_group, END_WORK_NBIOT | END_WORK_WIFI);
+    vTaskDelay(1);
+    
     // время сна в мин
     int sleeptime = get_menu_val_by_id("time");
 
@@ -271,17 +220,18 @@ void app_main(void)
         sleeptime = 5;
     }
 
+    // только если предыдущее и текущее ниже 3-х в
+    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0 && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery < 3.0)
+    {
+        sleeptime = get_menu_val_by_id("time") * 10;
+    }
+
     // транспортное положение вверх ногами
     if (check_range(result.measure.acc[0] * 1000.0, result.measure.acc[1] * 1000.0, result.measure.acc[2] * 1000.0, 0, 0, 1000, 300))
     {
         sleeptime = 24 * 60;                                  // сутки
         wake_mask = ((BIT64(PIN_BATT) | BIT64(PIN_INT_ACC))); // только зарядка и положение!
-    }
-
-    //только если предыдущее и текущее ниже 3-х в
-    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0 && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery < 3.0)
-    {
-        sleeptime = get_menu_val_by_id("time") * 10;
+        ESP_LOGW("main", "Storage mode");
     }
 
     if (result.measure.nbbattery > 0 && result.measure.nbbattery < 2.8)
@@ -298,7 +248,7 @@ void app_main(void)
 
     ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
-    //store only changes 
+    // store only changes
     if (history[history_pos].measure.flags != history[(history_pos - 1) % HISTORY_SIZE].measure.flags || history[history_pos].measure.flags != history[(history_pos - 2) % HISTORY_SIZE].measure.flags)
         history_pos = (history_pos + 1) % HISTORY_SIZE;
 

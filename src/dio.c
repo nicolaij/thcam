@@ -2,24 +2,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
-#include "esp_log.h"
 #include "driver/uart.h"
 #include "string.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
 
-#include "math.h"
-
 #include "freertos/queue.h"
 #include "driver/gptimer.h"
-
-#include "led_strip.h"
 
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "driver/ledc.h"
+
+#include <math.h>
 
 static const char *TAG = "DIO";
 
@@ -484,8 +481,6 @@ uint64_t dio_init()
     xQueue = xQueueCreateStatic(QUEUE_LENGTH, ITEM_SIZE, ucQueueStorageArea, &xStaticQueue);
     configASSERT(xQueue);
 
-    xQueueLed = xQueueCreate(2, sizeof(led_task_data_t));
-
     // install gpio isr service
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1));
 
@@ -573,7 +568,7 @@ uint64_t dio_init()
 
     vTaskDelay(1);
 
-    ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask && BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask && BIT64(PIN_INT_ACC)) != 0));
+    ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask & BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask & BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask & BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask & BIT64(PIN_INT_ACC)) != 0));
 
     return wake_mask;
 }
@@ -585,14 +580,14 @@ int get_charge()
 
 uint64_t dio_sleep(uint64_t wake_mask)
 {
-    ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask && BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask && BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask && BIT64(PIN_INT_ACC)) != 0));
+    ESP_LOGI(TAG, "Light: %d%c(%d); Water: %d%c(%d); Charge: %d(%d); INT ACC: %d(%d)", gpio_get_level(PIN_LIGHT), (result.measure.d_light_mode == 1) ? '+' : ' ', ((wake_mask & BIT64(PIN_LIGHT)) != 0), gpio_get_level(PIN_WATER3), (result.measure.d_wet_mode == 1) ? '+' : ' ', ((wake_mask & BIT64(PIN_WATER3)) != 0), gpio_get_level(PIN_BATT), ((wake_mask & BIT64(PIN_BATT)) != 0), gpio_get_level(PIN_INT_ACC), ((wake_mask & BIT64(PIN_INT_ACC)) != 0));
 
-    if (wake_mask && BIT64(PIN_LIGHT))
+    if (wake_mask & BIT64(PIN_LIGHT))
     {
         ESP_ERROR_CHECK(gpio_hold_en(PIN_LIGHT));
     }
 
-    if (wake_mask && BIT64(PIN_WATER3))
+    if (wake_mask & BIT64(PIN_WATER3))
     {
         ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER3));
     }
@@ -657,8 +652,10 @@ void btn_task(void *arg)
         {
             if ((esp_timer_get_time() - start_time) > (sleeptime * 60LL * 1000000LL))
             {
-                xTaskNotifyGive(xTaskDallas);
-                xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
+                if (xTaskDallas)
+                    xTaskNotifyGive(xTaskDallas);
+                if (xTaskI2C)
+                    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
                 water_cont_measure(false);
                 light_measure(0);
 
@@ -748,8 +745,10 @@ void btn_task(void *arg)
                 ESP_LOGI("IO", "Button short press!");
                 debounce = 0;
 
-                xTaskNotifyGive(xTaskDallas);
-                xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
+                if (xTaskDallas)
+                    xTaskNotifyGive(xTaskDallas);
+                if (xTaskI2C)
+                    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
                 water_cont_measure(false);
                 light_measure(10);
 
