@@ -3,14 +3,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_sleep.h"
-#include "esp_mac.h"
 
 #include "esp_spiffs.h"
 #include "sys/stat.h"
 
 #include "freertos/ringbuf.h"
-
-uint8_t mac[6];
 
 result_data_t result;
 
@@ -121,9 +118,6 @@ void app_main(void)
     uint64_t wake_mask = dio_init() | (BIT64(PIN_BATT) | BIT64(PIN_INT_ACC));
 
     ESP_LOGI("main", "Current date/time: %s", get_datetime(time(0)));
-
-    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
-    ESP_LOGI("MAC", "Local AP address " MACSTR, MAC2STR(mac));
 
     xTaskCreate(wifi_task, "wifi_task", 1024 * 4, NULL, configMAX_PRIORITIES - 5, &xHandleWifi);
 

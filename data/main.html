@@ -281,9 +281,62 @@
       var socket = new WebSocket("ws://" + location.host + "/ws");
 
       socket.onopen = function () {
-        socket.send("id=");
+        socket.send("openws:" + String(Date.now() / 1000));
       };
 
+      socket.onmessage = function (e) {
+        //console.log(e);
+        res = e.data.split(",");
+        acc = [res[0], res[1], res[2]]; //res[0].split(" ");
+        mag = [res[3], res[4], res[5]]; //mag = res[1].split(" ");
+        flags = Number(res[6]);
+
+        gauge_value(Number(acc[0]), "accx");
+        gauge_value(Number(acc[1]), "accy");
+        gauge_value(Number(acc[2]), "accz");
+        gauge_value(Math.sqrt(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]), "accv");
+
+        calculateAngles(Number(acc[0]), Number(acc[1]), Number(acc[2]));
+
+        gauge_value(Number(mag[0]), "magx");
+        gauge_value(Number(mag[1]), "magy");
+        gauge_value(Number(mag[2]), "magz");
+        gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
+
+        if (flags & (1 << 12)) document.getElementById("openflag").style.backgroundColor = "red";
+        else document.getElementById("openflag").style.backgroundColor = "transparent";
+
+        if (flags & (1 << 13)) document.getElementById("closeflag").style.backgroundColor = "red";
+        else document.getElementById("closeflag").style.backgroundColor = "transparent";
+      };
+
+      document.addEventListener("DOMContentLoaded", function () {
+        fetch("/menu")
+          .then((response) => {
+            return response.text();
+          })
+          .then((data) => {
+            document.getElementById("settingscontent").innerHTML = data;
+            if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
+            if (document.getElementById("enableclosemagX").innerHTML) use = "mag";
+            if (document.getElementById("enableopenaccX").innerHTML) use = "acc";
+            if (document.getElementById("enablecloseaccX").innerHTML) use = "acc";
+
+            if (use == "mag") document.getElementById("usemag").checked = true;
+            if (use == "acc") document.getElementById("useacc").checked = true;
+          });
+
+        fetch("/history")
+          .then((response) => {
+            return response.text();
+          })
+          .then((data) => {
+            data = "<table><tr><td>" + data.replace(/,/g, "</td><td>");
+            data = data.replace(/(?:\r\n|\r|\n)/g, "</td></tr><tr><td>") + "</td></tr></table>";
+            document.getElementById("filecontent").innerHTML = data;
+          });
+      });
+      
       function gauge_value(x, val) {
         const parentDOM = document.getElementById(val);
         parentDOM.getElementsByClassName("sc-value")[0].innerHTML = x.toFixed(2);
@@ -320,81 +373,23 @@
         const nz = Math.min(Math.max(z, -1), 1);
 
         // Вычисляем углы вращения
-        let rotateX = 0, rotateY = 0, rotateZ = 0;
+        let rotateX = 0,
+          rotateY = 0,
+          rotateZ = 0;
 
         rotateX = Math.atan2(ny, Math.sqrt(nx * nx + nz * nz)) * (-180 / Math.PI);
         //rotateY = Math.atan2(Math.sqrt(nx * nx + ny * ny), nz) * (180 / Math.PI);
         rotateZ = Math.atan2(nx, Math.sqrt(ny * ny + nz * nz)) * (180 / Math.PI);
 
         // Применяем преобразования к элементу
-        document.getElementById("cube").style.transform = "rotateX(" + rotateX + "deg) rotateY(" + rotateY + "deg) rotateZ(" + rotateZ + "deg)";
+        document.getElementById("cube").style.transform =
+          "rotateX(" + rotateX + "deg) rotateY(" + rotateY + "deg) rotateZ(" + rotateZ + "deg)";
 
         return { rotateX, rotateY, rotateZ };
       }
 
-      socket.onmessage = function (e) {
-        //console.log(e);
-        res = e.data.split(",");
-        acc = [res[0], res[1], res[2]]; //res[0].split(" ");
-        mag = [res[3], res[4], res[5]]; //mag = res[1].split(" ");
-        flags = Number(res[6]);
-
-        gauge_value(Number(acc[0]), "accx");
-        gauge_value(Number(acc[1]), "accy");
-        gauge_value(Number(acc[2]), "accz");
-        gauge_value(Math.sqrt(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]), "accv");
-
-        calculateAngles(Number(acc[0]), Number(acc[1]), Number(acc[2]));
-
-        gauge_value(Number(mag[0]), "magx");
-        gauge_value(Number(mag[1]), "magy");
-        gauge_value(Number(mag[2]), "magz");
-        gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
-
-        if (flags & (1 << 12)) document.getElementById("openflag").style.backgroundColor = "red";
-        else document.getElementById("openflag").style.backgroundColor = "transparent";
-
-        if (flags & (1 << 13)) document.getElementById("closeflag").style.backgroundColor = "red";
-        else document.getElementById("closeflag").style.backgroundColor = "transparent";
-      };
-
-      function ready() {
-        fetch("/menu")
-          .then((response) => {
-            return response.text();
-          })
-          .then((data) => {
-            document.getElementById("settingscontent").innerHTML = data;
-            if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
-            if (document.getElementById("enableclosemagX").innerHTML) use = "mag";
-            if (document.getElementById("enableopenaccX").innerHTML) use = "acc";
-            if (document.getElementById("enablecloseaccX").innerHTML) use = "acc";
-
-            if (use == "mag") document.getElementById("usemag").checked = true;
-            if (use == "acc") document.getElementById("useacc").checked = true;
-
-            document.getElementById("ip").value = num2string(document.getElementById("ip").value);
-          });
-
-        fetch("/history")
-          .then((response) => {
-            return response.text();
-          })
-          .then((data) => {
-            data = "<table><tr><td>" + data.replace(/,/g, "</td><td>");
-            data = data.replace(/(?:\r\n|\r|\n)/g, "</td></tr><tr><td>") + "</td></tr></table>";
-            document.getElementById("filecontent").innerHTML = data;
-          });
-      }
-
-      document.addEventListener("DOMContentLoaded", ready);
-
       function toggleCheckbox(element) {
-        if (element.checked == true) {
-          socket.send("id=" + element.name);
-        } else {
-          socket.send("id=");
-        }
+        socket.send(element.name + ":" + String(Number(element.checked)));
       }
 
       function storeCheckbox(element) {
@@ -419,8 +414,6 @@
       }
 
       function validate() {
-        document.getElementById("ip").value = string2num(document.getElementById("ip").value);
-
         if (document.getElementById("enableopenmagX").innerHTML) {
           val = document.getElementById("openmagX").value.split(" ");
           document.getElementById("openmagY").value = val[1];
@@ -453,16 +446,6 @@
           document.getElementById("closeacce").value = "1";
         } else document.getElementById("closeacce").value = "0";
       }
-
-      function num2string(ip) {
-        return [24, 16, 8, 0].map((n) => (ip >> n) & 0xff).join(".");
-      }
-
-      function string2num(ip) {
-        return ip.split(".").reduce((sum, x, i) => sum + (x << (8 * (3 - i))), 0);
-      }
-
-      //document.getElementById("cube").style.transform = "rotateX(-90deg) rotateY(-90deg) rotateZ(0deg)";
     </script>
   </body>
 </html>

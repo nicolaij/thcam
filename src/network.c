@@ -20,8 +20,10 @@
 
 #include "esp_spiffs.h"
 
-extern uint8_t mac[6];
-extern char pdp_ip[20];
+#include <arpa/inet.h>
+
+uint8_t mac[6];
+extern esp_ip4_addr_t pdp_ip;
 extern char net_status_current[32];
 
 #define CLIENT_WIFI_SSID "ap1"
@@ -114,6 +116,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 
 void wifi_init_softap(uint8_t channel, uint8_t ssid_hidden)
 {
+    ESP_LOGD("wifi_init_softap", "Start");
     esp_netif_create_default_wifi_ap();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -258,8 +261,6 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     if (filepath[l - 3] == '.' && filepath[l - 2] == 'g' && filepath[l - 1] == 'z')
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
 
-    // const esp_app_desc_t *app_ver = esp_app_get_description();
-
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=604800");
     httpd_resp_set_hdr(req, "ETag", app_elf_sha256_str);
 
@@ -300,12 +301,11 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
 
     int l = 0;
 
-    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON "<br>", get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
     const esp_app_desc_t *app_ver = esp_app_get_description();
 
-    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "<br>Firmware: %s (%s) MAC:" MACSTR, app_ver->version, app_ver->date, MAC2STR(mac));
-
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "Firmware: %s (%s) MAC:" MACSTR, app_ver->version, app_ver->date, MAC2STR(mac));
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", STATUS: ");
 
     if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
@@ -320,8 +320,10 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
 
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", NB-IoT: <b>%s</b> ", net_status_current);
 
-    if (strlen(pdp_ip) > 0)
-        l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", IP: %s", pdp_ip);
+    if (pdp_ip.addr > 0)
+        l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", IP: " IPSTR, IP2STR(&pdp_ip));
+    //    if (strlen(pdp_ip) > 0)
+    //        l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", IP: %s", pdp_ip);
 
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", Error: <b>%s %s %s %s</b>", (result.measure.d_thsensor_error == 1) ? "TH" : "", (result.measure.d_dallas_sensor_error == 1) ? "DS" : "", (result.measure.d_mag_sensor_error == 1) ? "ACC/MAG" : "", (result.measure.d_nbiot_error == 1) ? "NBIoT" : "");
 
@@ -345,16 +347,19 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
 
 static esp_err_t menu_post_handler(httpd_req_t *req)
 {
-    int ret, remaining = req->content_len;
-
-    while (remaining > 0)
+    int remaining = req->content_len;
+    int try = 3;
+    while (remaining > 0 && try > 0)
     {
         /* Read the data for the request */
+        int ret = 0;
         if ((ret = httpd_req_recv(req, network_buf, MIN(remaining, sizeof(network_buf)))) <= 0)
         {
             if (ret == HTTPD_SOCK_ERR_TIMEOUT)
             {
                 /* Retry receiving if timeout occurred */
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+                try--;
                 continue;
             }
             return ESP_FAIL;
@@ -372,13 +377,48 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
 
     char *s = network_buf;
     char name[16];
+    int mac2 = 0;
+    uint8_t addr[6];
     while (s && s < (network_buf + req->content_len))
     {
         char *e = strchr(s, '=');
         *e = '\0';
         strncpy(name, s, sizeof(name));
+        int v = 0;
+        if (strncmp(name, "ip", 2) == 0)
+        {
+            int parsed = sscanf((const char *)e + 1, "%hhu.%hhu.%hhu.%hhu", &addr[0], &addr[1], &addr[2], &addr[3]);
+            if (parsed == 4)
+            {
+                v = (addr[0] << 0) | (addr[1] << 8) | (addr[2] << 16) | (addr[3] << 24);
+            }
+        }
+        else if (strncmp(name, "MAC1", 4) == 0)
+        {
+            //&MAC1=00%3A00%3A00%3A00%3A00%3A51&MAC2=81
+            int parsed = sscanf((const char *)e + 1,
+                                "%hhx%%3A%hhx%%3A%hhx%%3A%hhx%%3A%hhx%%3A%hhx",
+                                &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5]);
 
-        int v = atoi(e + 1);
+            if (parsed == 6)
+            {
+                v = (addr[0] << 16) | (addr[1] << 8) | addr[2];
+                mac2 = (addr[3] << 16) | (addr[4] << 8) | addr[5];
+            }
+            else
+            {
+                mac2 = 0;
+            }
+        }
+        else if (strncmp(name, "MAC2", 4) == 0)
+        {
+            v = mac2;
+        }
+        else
+        {
+            v = atoi(e + 1);
+        }
+
         // ESP_LOGD("menu_post_handler", "Name  \"%s\" : \"%i\"", name, v);
         set_menu_val_by_id(name, v);
 
@@ -520,14 +560,16 @@ esp_err_t update_post_handler(httpd_req_t *req)
 
     /* Пишем в next_ota и прошивку и spiffs.bin*/
     const esp_partition_t *ota_partition = esp_ota_get_next_update_partition(NULL);
-
-    while (remaining > 0)
+    int try = 3;
+    while (remaining > 0 && try > 0)
     {
         int recv_len = httpd_req_recv(req, network_buf, MIN(remaining, sizeof(network_buf)));
 
         // Timeout Error: Just retry
         if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
         {
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            try--;
             continue;
 
             // Serious Error: Abort OTA
@@ -546,14 +588,14 @@ esp_err_t update_post_handler(httpd_req_t *req)
             {
                 ESP_ERROR_CHECK(esp_ota_begin(ota_partition, OTA_SIZE_UNKNOWN, &ota_handle));
             }
-            else if (remaining == 0x80000)
+            else if (remaining == 0x50000) //SPIFFS Image
             {
                 file_id = remaining;
-                ESP_ERROR_CHECK(esp_partition_erase_range(ota_partition, 0, 0x80000));
+                ESP_ERROR_CHECK(esp_partition_erase_range(ota_partition, 0, 0x50000));
             }
             else
             {
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "File Error");
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "File type Error");
                 return ESP_FAIL;
             }
         }
@@ -564,14 +606,14 @@ esp_err_t update_post_handler(httpd_req_t *req)
             // Successful Upload: Flash firmware chunk
             if (esp_ota_write(ota_handle, (const void *)network_buf, recv_len) != ESP_OK)
             {
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Flash Error");
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Flash write Error");
                 return ESP_FAIL;
             }
             vTaskDelay(1);
         }
         else
             // spiffs.bin
-            if (file_id == 0x80000)
+            if (file_id == 0x50000)
             {
                 ESP_ERROR_CHECK(esp_partition_write(ota_partition, (req->content_len - remaining), (const void *)network_buf, recv_len));
                 vTaskDelay(1);
@@ -593,10 +635,10 @@ esp_err_t update_post_handler(httpd_req_t *req)
         ESP_LOGW(TAGH, "Firmware update complete, rebooting now!");
         xEventGroupSetBits(status_event_group, REBOOT_NOW);
     }
-    else if (file_id == 0x80000)
+    else if (file_id == 0x50000)
     {
         const esp_partition_t *storage_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
-        ESP_ERROR_CHECK(esp_partition_erase_range(storage_partition, 0, 0x80000));
+        ESP_ERROR_CHECK(esp_partition_erase_range(storage_partition, 0, 0x50000));
 
         remaining = req->content_len;
         int recv_len = sizeof(network_buf);
@@ -685,17 +727,33 @@ static esp_err_t ws_handler(httpd_req_t *req)
         ESP_LOGI(TAGH, "Got packet with message: %s", ws_pkt.payload);
     }
 
-    ESP_LOGI(TAGH, "Packet type: %d", ws_pkt.type);
-    if ((ws_pkt.type == HTTPD_WS_TYPE_TEXT) && (strncmp((const char *)ws_pkt.payload, "id=", 3) == 0))
+    ESP_LOGI(TAGH, "ws_handler: httpd_handle_t=%p, sockfd=%d, client_info:%d", req->handle, httpd_req_to_sockfd(req), httpd_ws_get_fd_info(req->handle, httpd_req_to_sockfd(req)));
+
+    const char *initstring = "openws:";
+    if (strncmp(initstring, (const char *)ws_pkt.payload, strlen(initstring)) == 0)
     {
-        if (strncmp((const char *)(&ws_pkt.payload[3]), "accmag", 6) == 0)
+        long long ts = atoll((const char *)ws_pkt.payload + strlen(initstring));
+        if (ts > 1715923962LL) // 17 May 2024 05:32:42
+        {
+            struct timeval now = {.tv_sec = ts + timezone * 3600}; // UNIX time + timezone offset
+            settimeofday(&now, NULL);
+
+            ESP_LOGI(TAGH, "WS set date and time: %s", get_datetime(time(0)));
+        }
+        need_ws_send = true;
+    }
+
+    if (strncmp("accmag:", (const char *)ws_pkt.payload, 7) == 0)
+    {
+        int cmd = atoi((const char *)ws_pkt.payload + 7);
+        if (cmd != 0)
         {
             xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC_SPEEDCONT, eSetValueWithOverwrite);
             // return trigger_async_send(req->handle, req);
             async_resp_arg.fd = httpd_req_to_sockfd(req);
             async_resp_arg.hd = req->handle;
 
-            // ESP_LOGI(TAGH, "fd: %d", async_resp_arg.fd);
+            //ESP_LOGI(TAGH, "fd: %d", async_resp_arg.fd);
         }
         else
         {
@@ -877,6 +935,9 @@ static httpd_handle_t start_webserver(void)
 
 void wifi_task(void *arg)
 {
+    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
+    ESP_LOGI("mac AP", MACSTR, MAC2STR(mac));
+
     uint32_t ulNotifiedValue;
     /* Ожидание оповещения безконечно, для запуска WiFi. */
     xTaskNotifyWait(pdFALSE,          /* Не очищать биты на входе. */

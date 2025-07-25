@@ -30,8 +30,8 @@ menu_t menu[] = {
     {.id = "ip", .name = "IP сервера", .izm = "", .val = ((10 << 24) | (179 << 16) | (40 << 8) | (20)), .min = INT32_MIN, .max = INT32_MAX},
     {.id = "tcpport", .name = "TCP порт сервера (0: не исп.)", .izm = "", .val = 48885, .min = 0, .max = 65535},
     {.id = "udpport", .name = "UDP порт сервера (0: не исп.)", .izm = "", .val = 0, .min = 0, .max = 65535},
-    {.id = "MAC1", .name = "ESPNOW! Target MAC[0,1,2]", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
-    {.id = "MAC2", .name = "ESPNOW! Target MAC[3,4,5]", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
+    {.id = "MAC1", .name = "ESPNOW! Target MAC", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
+    {.id = "MAC2", .name = "", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
     //{.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
     //{.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
     {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999},
@@ -90,7 +90,7 @@ esp_err_t read_nvs_menu()
             switch (err)
             {
             case ESP_OK:
-                ESP_LOGD("NVS", "Read \"%s\" = %d", menu[i].name, menu[i].val);
+                ESP_LOGD("NVS", "Read \"%s\" = %i", menu[i].name, menu[i].val);
                 break;
             case ESP_ERR_NVS_NOT_FOUND:
                 ESP_LOGD("NVS", "The value  \"%s\" is not initialized yet!", menu[i].name);
@@ -190,7 +190,7 @@ int get_menu_json(char *buf)
     buf[pos++] = '{';
     for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
     {
-        pos += sprintf(&buf[pos], "\"%s\":[\"%s\",%d,\"%s\"]", menu[i].id, menu[i].name, menu[i].val, menu[i].izm);
+        pos += sprintf(&buf[pos], "\"%s\":[\"%s\",%i,\"%s\"]", menu[i].id, menu[i].name, menu[i].val, menu[i].izm);
         if (i < sizeof(menu) / sizeof(menu_t) - 1)
             buf[pos++] = ',';
         else
@@ -216,25 +216,38 @@ int get_menu_html(char *buf)
             return pos;
         }
 
-        if (strlen(menu[index].name) > 0)
+        if (index == 3) // IP
         {
-            // if (i == 11 || i == 15 || i == 19 || i == 23) // XYZ
-            if (strnstr(menu[index].id, "accX", sizeof(menu[0].id)) > menu[index].id || strnstr(menu[index].id, "magX", sizeof(menu[0].id)) > menu[index].id)
-            {
-                char e[8] = {0};
-                if (menu[index + 3].val)
-                {
-                    strcpy(e, "Вкл");
-                };
-
-                pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%d %d %d\"/><b id=\"enable%s\">%s</b></td></tr>\n", menu[index].id, menu[index].name, menu[index].id, menu[index].id, menu[index].val, menu[index + 1].val, menu[index + 2].val, menu[index].id, e);
-            }
-            else
-            {
-                pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%d\"/>%s</td></tr>\n", menu[index].id, menu[index].name, menu[index].id, menu[index].id, menu[index].val, menu[index].izm);
-            }
+            esp_ip4_addr_t ip_addr;
+            ip_addr.addr = (unsigned int)menu[index].val;
+            pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"" IPSTR "\"/></td></tr>\n", menu[index].id, menu[index].name, menu[index].id, menu[index].id, IP2STR(&ip_addr));
         }
-        else
+        else if (index == 6) // MAC
+        {
+            uint8_t mac_addr[6];
+            mac_addr[0] = (menu[index].val >> 16) & 0xFF;
+            mac_addr[1] = (menu[index].val >> 8) & 0xFF;
+            mac_addr[2] = (menu[index].val >> 0) & 0xFF;
+            mac_addr[3] = (menu[index + 1].val >> 16) & 0xFF;
+            mac_addr[4] = (menu[index + 1].val >> 8) & 0xFF;
+            mac_addr[5] = (menu[index + 1].val >> 0) & 0xFF;
+            pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"" MACSTR "\"/></td></tr>\n", menu[index].id, menu[index].name, menu[index].id, menu[index].id, MAC2STR(mac_addr));
+        }
+        else if (index == 8 || index == 12 || index == 16 || index == 20) // Концевики
+        {
+            char e[8] = {0};
+            if (menu[index + 3].val)
+            {
+                strcpy(e, "Вкл");
+            };
+
+            pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%d %d %d\"/><b id=\"enable%s\">%s</b></td></tr>\n", menu[index].id, menu[index].name, menu[index].id, menu[index].id, menu[index].val, menu[index + 1].val, menu[index + 2].val, menu[index].id, e);
+        }
+        else if (strlen(menu[index].name) > 0)
+        {
+            pos += sprintf(&buf[pos], "<tr><td><label for=\"%s\">%s:</label></td><td><input type=\"text\" id=\"%s\" name=\"%s\" value=\"%d\"/>%s</td></tr>\n", menu[index].id, menu[index].name, menu[index].id, menu[index].id, menu[index].val, menu[index].izm);
+        }
+        else // hidden
         {
             pos += sprintf(&buf[pos], "<input type=\"hidden\" id=\"%s\" name=\"%s\" value=\"%d\">", menu[index].id, menu[index].id, menu[index].val);
         }
@@ -267,7 +280,6 @@ void console_task(void *arg)
 
     while (1)
     {
-
         const int c = fgetc(stdin);
         if (c > 0) // EOF = -1
         {
@@ -328,7 +340,8 @@ void console_task(void *arg)
                     ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
                     ESP_LOGI("menu", "-------------------------------------------");
-                    for (int i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
+                    int i = 0;
+                    for (i = 0; i < sizeof(menu) / sizeof(menu_t); i++)
                     {
                         if (i == 3) // IP сервера
                         {
@@ -346,7 +359,7 @@ void console_task(void *arg)
                             ESP_LOGI("menu", "%2i. %s: " MACSTR, i + 1, menu[i].name, MAC2STR(mac_addr));
                         }
                         else if (strlen(menu[i].name) > 0)
-                            ESP_LOGI("menu", "%2i. %s: %d %s", i + 1, menu[i].name, menu[i].val, menu[i].izm);
+                            ESP_LOGI("menu", "%2i. %s: %i %s", i + 1, menu[i].name, menu[i].val, menu[i].izm);
                     }
 
                     ESP_LOGI("menu", "51. История: %u", bootCount);

@@ -454,7 +454,7 @@ void modem_task(void *arg)
 
             ESP_LOGD(TAG, "Wait... %s", data);
 
-            if (strnstr((const char *)data, "CPIN: READY", 100) != NULL)
+            if (strnstr((const char *)data, "CPIN: READY", strlen(data)) != NULL)
             {
                 cpin = true;
                 ESP_LOGI(TAG, "CPIN: READY");
@@ -790,7 +790,7 @@ void modem_task(void *arg)
             }
             else
             {
-                const char *pdata = strnstr((const char *)data, "CSOC: ", 100);
+                const char *pdata = strnstr((const char *)data, "CSOC: ", strlen(data));
                 if (pdata)
                 {
                     socket = atoi(pdata + 6);
