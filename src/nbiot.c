@@ -613,7 +613,9 @@ void modem_task(void *arg)
                         tAT = fromActiveTime(strtol(bf, NULL, 2));
                         snprintf(bf, 9, "%8X", creg[9]);
                         tRT = fromPeriodicTAU(strtol(bf, NULL, 2));
-                        ESP_LOGI(TAG, "Registered. Home network. TAC=%u, CI=%u Active-Time=%02d:%02d:%02d Periodic-TAU=%02d:%02d:%02d", creg[2], creg[3], (tAT / (60 * 60)), (tAT / 60) % 60, (tAT % 60), (tRT / (60 * 60)), (tRT / 60) % 60, (tRT % 60));
+                        result.measure.tac = creg[2];
+                        result.measure.ci = creg[3];
+                        ESP_LOGI(TAG, "Registered. Home network. TAC=%u, CI=%u Active-Time=%02d:%02d:%02d Periodic-TAU=%02d:%02d:%02d", result.measure.tac, result.measure.ci, (tAT / (60 * 60)), (tAT / 60) % 60, (tAT % 60), (tRT / (60 * 60)), (tRT / 60) % 60, (tRT % 60));
                         break;
                     }
                     vTaskDelay(1000 / portTICK_PERIOD_MS);
