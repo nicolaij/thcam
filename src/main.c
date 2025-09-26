@@ -197,7 +197,7 @@ void app_main(void)
     // принудительно заканчиваем работу NBIoT и WiFi
     xEventGroupSetBits(status_event_group, END_WORK_NBIOT | END_WORK_WIFI);
     vTaskDelay(1);
-    
+
     // время сна в мин
     int sleeptime = get_menu_val_by_id("time");
 
@@ -215,7 +215,7 @@ void app_main(void)
     }
 
     // только если предыдущее и текущее ниже 3-х в
-    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0 && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery < 3.0)
+    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0 && (history_pos >= 1) && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery < 3.0)
     {
         sleeptime = get_menu_val_by_id("time") * 10;
     }
@@ -230,7 +230,7 @@ void app_main(void)
 
     if (result.measure.nbbattery > 0 && result.measure.nbbattery < 2.8)
     {
-        sleeptime = get_menu_val_by_id("time") * 1000;
+        sleeptime = get_menu_val_by_id("time") * 24;
         wake_mask = (BIT64(PIN_BATT)); // только зарядка!
     }
 
@@ -243,7 +243,7 @@ void app_main(void)
     ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
     // store only changes
-    if (history[history_pos].measure.flags != history[(history_pos - 1) % HISTORY_SIZE].measure.flags || history[history_pos].measure.flags != history[(history_pos - 2) % HISTORY_SIZE].measure.flags)
+    if (history_pos < 2 || history[history_pos].measure.flags != history[(history_pos - 1) % HISTORY_SIZE].measure.flags || history[history_pos].measure.flags != history[(history_pos - 2) % HISTORY_SIZE].measure.flags)
         history_pos = (history_pos + 1) % HISTORY_SIZE;
 
     // если зарядка - сон 5 мин.

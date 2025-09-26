@@ -330,15 +330,15 @@ esp_err_t apply_command(const char *cmd, size_t len)
 }
 
 // Callback при отправке
-void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
 {
     ESP_LOGI(TAG, "Packet to " MACSTR ", status: %s",
-             MAC2STR(mac_addr),
+             MAC2STR(tx_info->des_addr),
              status == ESP_NOW_SEND_SUCCESS ? "Success" : "Failed");
 }
 
 // Callback при получении
-void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len)
+static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len)
 {
     ESP_LOGI(TAG, "Received from " MACSTR ", len: %d", MAC2STR(recv_info->src_addr), len);
     apply_command((const char *)data, len);
@@ -515,6 +515,8 @@ void modem_task(void *arg)
 
                 if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
                 {
+                    result.ttime = time(0); //ОБНОВЛЯЕМ ВРЕМЯ НА ЗАРЯДКЕ
+
                     if (!cpsms_charge)
                     {
                         at_reply_wait_OK("AT+CPSMS=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);

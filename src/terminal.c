@@ -350,12 +350,12 @@ void console_task(void *arg)
                         }
                         else if (i == 6) // MAC
                         {
-                            mac_addr[0] = (menu[7].val >> 16) & 0xFF;
-                            mac_addr[1] = (menu[7].val >> 8) & 0xFF;
-                            mac_addr[2] = (menu[7].val >> 0) & 0xFF;
-                            mac_addr[3] = (menu[8].val >> 16) & 0xFF;
-                            mac_addr[4] = (menu[8].val >> 8) & 0xFF;
-                            mac_addr[5] = (menu[8].val >> 0) & 0xFF;
+                            mac_addr[0] = (menu[6].val >> 16) & 0xFF;
+                            mac_addr[1] = (menu[6].val >> 8) & 0xFF;
+                            mac_addr[2] = (menu[6].val >> 0) & 0xFF;
+                            mac_addr[3] = (menu[7].val >> 16) & 0xFF;
+                            mac_addr[4] = (menu[7].val >> 8) & 0xFF;
+                            mac_addr[5] = (menu[7].val >> 0) & 0xFF;
                             ESP_LOGI("menu", "%2i. %s: " MACSTR, i + 1, menu[i].name, MAC2STR(mac_addr));
                         }
                         else if (strlen(menu[i].name) > 0)
@@ -377,12 +377,12 @@ void console_task(void *arg)
                     ESP_LOGI("menu", "-------------------------------------------");
                     break;
                 case 7: // MAC Address
-                    mac_addr[0] = (menu[7].val >> 16) & 0xFF;
-                    mac_addr[1] = (menu[7].val >> 8) & 0xFF;
-                    mac_addr[2] = (menu[7].val >> 0) & 0xFF;
-                    mac_addr[3] = (menu[8].val >> 16) & 0xFF;
-                    mac_addr[4] = (menu[8].val >> 8) & 0xFF;
-                    mac_addr[5] = (menu[8].val >> 0) & 0xFF;
+                    mac_addr[0] = (menu[6].val >> 16) & 0xFF;
+                    mac_addr[1] = (menu[6].val >> 8) & 0xFF;
+                    mac_addr[2] = (menu[6].val >> 0) & 0xFF;
+                    mac_addr[3] = (menu[7].val >> 16) & 0xFF;
+                    mac_addr[4] = (menu[7].val >> 8) & 0xFF;
+                    mac_addr[5] = (menu[7].val >> 0) & 0xFF;
 
                     ESP_LOGI("menu", "-------------------------------------------");
                     ESP_LOGI("menu", "%2i. %s: " MACSTR ". Введите новое значение: ", n, menu[n - 1].name, MAC2STR(mac_addr));

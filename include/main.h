@@ -160,10 +160,10 @@ typedef struct
 
 extern result_data_t result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\",\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"tac\":%u,\"ci\":%u}"
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\",\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"TAC\":%u,\"CI\":%u}"
 #define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2]
 #define OUT_MEASURE_VARS(prefix) prefix.nbbattery, prefix.rssi, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.flags, OUT_MEASURE_ACC_VARS(prefix), prefix.tac, prefix.ci
-#define OUT_MEASURE_HEADERS "Battery, RSSI, Light, Water, WaterTemp, Temp, Humidity, Flags, AccX, AccY, AccZ, MagX, MagY, MagZ, tac, ci"
+#define OUT_MEASURE_HEADERS "Battery, RSSI, Light, Water, WaterTemp, Temp, Humidity, Flags, AccX, AccY, AccZ, MagX, MagY, MagZ, TAC, CI"
 #define OUT_MEASURE_ACC_FORMATS "%.2f, %.2f, %.2f, %.2f, %.2f, %.2f"
 #define OUT_MEASURE_FORMATS "%.3f, %2.0f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, 0x%04X, " OUT_MEASURE_ACC_FORMATS ", %u, %u"
 
