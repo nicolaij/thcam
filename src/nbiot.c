@@ -118,8 +118,8 @@ esp_err_t wait_string(char *buffer, const char *wait, TickType_t ticks_to_wait)
     esp_err_t res = ESP_ERR_TIMEOUT;
     do
     {
-        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), ticks_to_wait / 5);
-        // ESP_LOGD(TAG, "len: %d", len);
+        int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), 10);
+        //ESP_LOGD(TAG, "len: %d", len);
         if (len > 0)
         {
             pb += len;
@@ -363,6 +363,38 @@ esp_err_t init_espnow(uint8_t *peer_addr)
     return err_rc;
 }
 
+esp_err_t send_by_espnow(uint8_t *mac_addr, uint8_t *send_data)
+{
+    if (xHandleWifi)
+        xTaskNotify(xHandleWifi, NOTYFY_WIFI_ESPNOW, eSetValueWithOverwrite); // включаем WiFi для ESPNOW
+
+    ESP_LOGI("ESPNOW", "WiFi start");
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+    init_espnow(mac_addr);
+
+    int l = snprintf((char *)send_data, TX_BUF_SIZE, OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+
+    esp_err_t err_rc = esp_now_send(mac_addr, (uint8_t *)send_data, l);
+
+    if (err_rc == ESP_OK)
+    {
+        ESP_LOGI("ESPNOW", "Message sent successfully");
+    }
+    else
+    {
+        ESP_LOGE("ESPNOW", "Error sending message: %s to " MACSTR, esp_err_to_name(err_rc), MAC2STR(mac_addr));
+    }
+
+    // wait 1s for reply from server
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+    ESP_ERROR_CHECK(esp_now_deinit());
+
+    return err_rc;
+}
+
 void modem_task(void *arg)
 {
     char data[RX_BUF_SIZE];
@@ -397,7 +429,7 @@ void modem_task(void *arg)
     strcpy(net_status_current, "OFF");
     result.measure.d_nbiot_error = true;
 
-    int protocol = 1; // ESPNOW = 0, TCP = 1, UDP =2
+    int protocol = 1; // TCP = 1, UDP =2
 
     int mac1 = get_menu_val_by_id("MAC1");
     int mac2 = get_menu_val_by_id("MAC2");
@@ -410,9 +442,11 @@ void modem_task(void *arg)
         (mac2 >> 0) & 0xFF,
     };
 
-    if (mac2 > 0 || mac2 > 0)
+    bool espnow_need_send = false;
+
+    if (mac1 > 0 || mac2 > 0)
     {
-        protocol = 0;
+        espnow_need_send = true;
     }
 
     while (1)
@@ -440,7 +474,15 @@ void modem_task(void *arg)
                 // power off
                 ESP_LOGD(TAG, "Try %d. Power OFF", d_nbiot_error_counter);
                 nbiot_power_pin(1500 / portTICK_PERIOD_MS);
-                vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+                if (espnow_need_send)
+                {
+                    send_by_espnow(mac_addr, (uint8_t *)send_data);
+                    espnow_need_send = false;
+                }
+                else
+                    vTaskDelay(5000 / portTICK_PERIOD_MS);
+
                 break;
             default:
                 // sleep exit
@@ -515,7 +557,7 @@ void modem_task(void *arg)
 
                 if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
                 {
-                    result.ttime = time(0); //ОБНОВЛЯЕМ ВРЕМЯ НА ЗАРЯДКЕ
+                    result.ttime = time(0); // ОБНОВЛЯЕМ ВРЕМЯ НА ЗАРЯДКЕ
 
                     if (!cpsms_charge)
                     {
@@ -549,6 +591,12 @@ void modem_task(void *arg)
                     try_counter++;
                     ESP_LOGW(TAG, "CPIN:\n%s", data);
 
+                    if (espnow_need_send)
+                    {
+                        send_by_espnow(mac_addr, (uint8_t *)send_data);
+                        espnow_need_send = false;
+                    }
+
                     if ((xEventGroupGetBits(status_event_group) & END_WORK_NBIOT))
                         break;
 
@@ -565,9 +613,11 @@ void modem_task(void *arg)
                     vTaskDelay(1000 / portTICK_PERIOD_MS);
                     if (try_counter > 4)
                     {
+
                         // power off
                         if (print_atcmd("AT+CPOWD=1\r\n", data) == ESP_OK)
                             ESP_LOGI(TAG, "Power DOWN");
+
                         break;
                     }
                     else
@@ -655,6 +705,7 @@ void modem_task(void *arg)
                 at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);  // Automatic time update via NITZ
 
                 at_reply_wait_OK("AT+CPSMSTATUS=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                //Enable PSM mode
                 // #TAU 30sec * 3 , ACC 8 sec
                 // at_reply_wait_OK("AT+CPSMS=1,,,\"10000011\",\"00000100\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                 // TAU 25h 1*25, ACC 0 sec
@@ -697,9 +748,10 @@ void modem_task(void *arg)
             // get current date time
             result.ttime = time(0);
 
-            if (protocol == 0)
+            if (espnow_need_send)
             {
-                break;
+                send_by_espnow(mac_addr, (uint8_t *)send_data);
+                espnow_need_send = false;
             }
 
             // ee = at_reply_wait_OK("AT+CTZU?\r\n", (char *)data, 10000 / portTICK_PERIOD_MS);
@@ -800,7 +852,7 @@ void modem_task(void *arg)
                     socket = atoi(pdata + 6);
 
                     try_counter = 3;
-                    while (try_counter--)
+                    while (try_counter)
                     {
                         snprintf(send_data, sizeof(send_data), "AT+CSOCON=%i,%i,\"" IPSTR "\"\r\n", socket, port, IP2STR(&ip));
                         ESP_LOGI(TAG, "%i Socket %i connect...", 3 - try_counter, socket);
@@ -876,40 +928,13 @@ void modem_task(void *arg)
                 }
             } while ((esp_timer_get_time() - start_time) < 10 * 1000000);
 
-            while (protocol == 1 && socket >= 0) // TCP
+            while (socket >= 0)
             {
                 snprintf(send_data, sizeof(send_data), "AT+CSOCL=%i\r\n", socket--);
                 at_reply_wait_OK(send_data, (char *)data, 1000 / portTICK_PERIOD_MS); // CLOSE socket
             }
             break;
         };
-
-        if (protocol == 0)
-        {
-            if (xHandleWifi)
-                xTaskNotify(xHandleWifi, NOTYFY_WIFI_ESPNOW, eSetValueWithOverwrite); // включаем WiFi для ESPNOW
-
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            init_espnow(mac_addr);
-
-            int l = snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
-
-            esp_err_t result = esp_now_send(mac_addr, (uint8_t *)send_data, l);
-
-            if (result == ESP_OK)
-            {
-                ESP_LOGI("ESPNOW", "Message sent successfully");
-            }
-            else
-            {
-                ESP_LOGE("ESPNOW", "Error sending message: %s to " MACSTR, esp_err_to_name(result), MAC2STR(mac_addr));
-            }
-
-            // wait 1s for reply from server
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-            ESP_ERROR_CHECK(esp_now_deinit());
-        }
 
         // clear notify
         ulTaskNotifyTake(pdTRUE, 0);

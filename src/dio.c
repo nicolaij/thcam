@@ -246,11 +246,6 @@ void water_cont_measure(bool printdata)
 
     int dir = 0;
 
-    gpio_pulldown_dis(PIN_WATER1);
-    gpio_pullup_dis(PIN_WATER1);
-    gpio_pulldown_dis(PIN_WATER2);
-    gpio_pullup_dis(PIN_WATER2);
-
     ESP_ERROR_CHECK(adc_continuous_start(cont_handle));
 
     while (len < sizeof(adcresult))

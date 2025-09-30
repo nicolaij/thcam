@@ -133,8 +133,8 @@ typedef struct
 
             bool open : 1;  // Дискретный сигнал открыто
             bool close : 1; // Дискретный сигнал закрыто
-            bool reserved15 : 1;
-            bool reserved16 : 1;
+            bool d_rst_brownout : 1; //сброс по причине нехватки напряжения
+            bool d_rst_deepsleep : 1; //проснулись из deep sleep
         };
     };
     unsigned int bootcount;

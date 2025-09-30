@@ -66,7 +66,7 @@ void app_main(void)
             if (pin == PIN_LIGHT)
                 result.measure.d_light = true;
 
-            if (pin == PIN_WATER2)
+            if (pin == PIN_WATER3)
                 result.measure.d_water = true;
 
             if (pin == PIN_INT_ACC)
@@ -91,6 +91,17 @@ void app_main(void)
     default:
         ESP_LOGI("main", "Wakeup was not caused by deep sleep: %d", wakeup_reason);
         break;
+    }
+
+    esp_reset_reason_t reason = esp_reset_reason();
+    ESP_LOGD("main", "After restart! %d", reason);
+    if (reason == ESP_RST_BROWNOUT)
+    {
+        result.measure.d_rst_brownout = true;
+    }
+    else if (reason == ESP_RST_DEEPSLEEP)
+    {
+        result.measure.d_rst_deepsleep = true;
     }
 
     bootCount++;
@@ -214,8 +225,8 @@ void app_main(void)
         sleeptime = 5;
     }
 
-    // только если предыдущее и текущее ниже 3-х в
-    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0 && (history_pos >= 1) && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery < 3.0)
+    // только если предыдущее и текущее ниже 3B
+    if (result.measure.nbbattery > 0 && result.measure.nbbattery < 3.0 && history_pos > 0 && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery > 0.0 && history[(history_pos - 1) % HISTORY_SIZE].measure.nbbattery < 3.0)
     {
         sleeptime = get_menu_val_by_id("time") * 10;
     }
@@ -242,8 +253,9 @@ void app_main(void)
 
     ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
-    // store only changes
-    if (history_pos < 2 || history[history_pos].measure.flags != history[(history_pos - 1) % HISTORY_SIZE].measure.flags || history[history_pos].measure.flags != history[(history_pos - 2) % HISTORY_SIZE].measure.flags)
+    // store only changes: flags, ci
+    if (history_pos < 2 || history[history_pos].measure.flags != history[(history_pos - 1) % HISTORY_SIZE].measure.flags || history[history_pos].measure.flags != history[(history_pos - 2) % HISTORY_SIZE].measure.flags ||
+        history[history_pos].measure.ci != history[(history_pos - 1) % HISTORY_SIZE].measure.ci)
         history_pos = (history_pos + 1) % HISTORY_SIZE;
 
     // если зарядка - сон 5 мин.
