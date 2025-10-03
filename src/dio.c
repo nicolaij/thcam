@@ -518,7 +518,7 @@ uint64_t dio_init()
     // Water - с подтяжкой
     if (gpio_get_level(PIN_WATER3) == 1)
     {
-        gpio_pulldown_en(PIN_WATER3);
+        //gpio_pulldown_en(PIN_WATER3);
         result.measure.d_wet_mode = 1;
         vTaskDelay(1);
         if (gpio_get_level(PIN_WATER3) == 1)
@@ -579,24 +579,24 @@ uint64_t dio_sleep(uint64_t wake_mask)
 
     if (wake_mask & BIT64(PIN_LIGHT))
     {
-        ESP_ERROR_CHECK(gpio_hold_en(PIN_LIGHT));
+        //ESP_ERROR_CHECK(gpio_hold_en(PIN_LIGHT));
     }
 
     if (wake_mask & BIT64(PIN_WATER3))
     {
-        ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER3));
+        //ESP_ERROR_CHECK(gpio_hold_en(PIN_WATER3));
     }
 
     if (gpio_get_level(PIN_BATT) == 0)
     {
         wake_mask |= BIT64(PIN_BATT);
-        ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
+        //ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
     }
 
     if (gpio_get_level(PIN_INT_ACC) == 0)
     {
         wake_mask |= BIT64(PIN_INT_ACC);
-        ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
+        //ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
     }
 
     ESP_ERROR_CHECK(esp_deep_sleep_enable_gpio_wakeup(wake_mask, ESP_GPIO_WAKEUP_GPIO_HIGH));

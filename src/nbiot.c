@@ -21,7 +21,7 @@ esp_ip4_addr_t pdp_ip;
 char net_status_current[32];
 
 RTC_DATA_ATTR bool first_run_completed = false;
-RTC_DATA_ATTR bool cpsms_charge = false;
+RTC_DATA_ATTR bool cpsms0 = false;
 
 int timezone = 3;
 
@@ -119,7 +119,7 @@ esp_err_t wait_string(char *buffer, const char *wait, TickType_t ticks_to_wait)
     do
     {
         int len = uart_read_bytes(UART_NUM_1, pb, (RX_BUF_SIZE - 1), 10);
-        //ESP_LOGD(TAG, "len: %d", len);
+        // ESP_LOGD(TAG, "len: %d", len);
         if (len > 0)
         {
             pb += len;
@@ -330,10 +330,12 @@ esp_err_t apply_command(const char *cmd, size_t len)
 }
 
 // Callback при отправке
-static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+//static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)  //espidf 5.5.0
 {
     ESP_LOGI(TAG, "Packet to " MACSTR ", status: %s",
-             MAC2STR(tx_info->des_addr),
+             //MAC2STR(tx_info->des_addr),
+             MAC2STR(mac_addr),
              status == ESP_NOW_SEND_SUCCESS ? "Success" : "Failed");
 }
 
@@ -534,46 +536,41 @@ void modem_task(void *arg)
 
             // Battery Charge
             int cbc[2] = {-1, -1};
-
-            do // loop when charge
+            ee = at_reply_get("AT+CBC\r\n", "CBC:", (char *)data, cbc, 2, 1000 / portTICK_PERIOD_MS);
+            result.measure.nbbattery = cbc[1] / 1000.0;
+            if (ee != ESP_OK)
             {
-                ee = at_reply_get("AT+CBC\r\n", "CBC:", (char *)data, cbc, 2, 1000 / portTICK_PERIOD_MS);
-                result.measure.nbbattery = cbc[1] / 1000.0;
-                if (ee != ESP_OK)
+                ESP_LOGW(TAG, "AT+CBC");
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
+            else
+            {
+                // Зарядка окончена. Передаем информацию
+                if (result.measure.nbbattery > 3.5)
                 {
-                    ESP_LOGW(TAG, "AT+CBC");
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
-                }
-                else
-                {
-                    // Зарядка окончена. Передаем информацию
-                    if (result.measure.nbbattery > 3.5)
-                    {
-                        ESP_LOGI(TAG, "Charge complete");
-                        xEventGroupSetBits(status_event_group, CHARGE_COMPLETE);
-                        break;
-                    };
+                    ESP_LOGI(TAG, "Charge complete");
+                    xEventGroupSetBits(status_event_group, CHARGE_COMPLETE);
                 };
+            };
 
-                if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
+            if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge())
+            {
+                result.ttime = time(0); // ОБНОВЛЯЕМ ВРЕМЯ НА ЗАРЯДКЕ
+
+                if (!cpsms0)
                 {
-                    result.ttime = time(0); // ОБНОВЛЯЕМ ВРЕМЯ НА ЗАРЯДКЕ
-
-                    if (!cpsms_charge)
-                    {
-                        at_reply_wait_OK("AT+CPSMS=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                        cpsms_charge = true;
-                    }
-                    vTaskDelay(25000 / portTICK_PERIOD_MS);
+                    at_reply_wait_OK("AT+CPSMS=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                    cpsms0 = true;
                 }
-
-            } while (((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || get_charge()) && (xEventGroupGetBits(status_event_group) & NB_TERMINAL) == 0);
-
-            cpsms_charge = false;
+                vTaskDelay(25000 / portTICK_PERIOD_MS);
+                continue;
+            }
 
             // если запускаем терминал - стоп работа с модулем
             if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
             {
+                at_reply_wait_OK("AT+CPSMS=0\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                cpsms0 = true;
                 break;
             }
 
@@ -697,7 +694,7 @@ void modem_task(void *arg)
             }
 
             // Clock
-            if (first_run_completed == false)
+            if (first_run_completed == false || cpsms0)
             {
                 // AT+CURTC? AT+CTZR?
                 // ee = at_reply_wait_OK("AT+CTZR=?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
@@ -705,12 +702,12 @@ void modem_task(void *arg)
                 at_reply_wait_OK("AT+CTZU=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);  // Automatic time update via NITZ
 
                 at_reply_wait_OK("AT+CPSMSTATUS=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                //Enable PSM mode
-                // #TAU 30sec * 3 , ACC 8 sec
-                // at_reply_wait_OK("AT+CPSMS=1,,,\"10000011\",\"00000100\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                // TAU 25h 1*25, ACC 0 sec
+                // Enable PSM mode
+                //  #TAU 30sec * 3 , ACC 8 sec
+                //  at_reply_wait_OK("AT+CPSMS=1,,,\"10000011\",\"00000100\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
+                //  TAU 25h 1*25, ACC 0 sec
                 at_reply_wait_OK("AT+CPSMS=1,,,\"00111001\",\"00000000\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-
+                cpsms0 = false;
                 // CREATE UDP port
                 // at_reply_wait_OK("AT+CSOC=1,2,1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 
