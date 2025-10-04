@@ -267,8 +267,8 @@ void app_main(void)
     uint64_t time_in_us = sleeptime * 60ULL * 1000000ULL;
     esp_sleep_enable_timer_wakeup(time_in_us);
 
-    // ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, 0xffff));
-
+    ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, wake_mask));
     fflush(stdout);
+
     esp_deep_sleep_start();
 }

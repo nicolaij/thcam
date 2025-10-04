@@ -330,12 +330,12 @@ esp_err_t apply_command(const char *cmd, size_t len)
 }
 
 // Callback при отправке
-static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
-//static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)  //espidf 5.5.0
+//static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)  //espidf 5.5.0
 {
     ESP_LOGI(TAG, "Packet to " MACSTR ", status: %s",
-             //MAC2STR(tx_info->des_addr),
-             MAC2STR(mac_addr),
+             MAC2STR(tx_info->des_addr),
+             //MAC2STR(mac_addr),
              status == ESP_NOW_SEND_SUCCESS ? "Success" : "Failed");
 }
 
