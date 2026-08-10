@@ -19,6 +19,7 @@
 #include <esp_http_server.h>
 
 #include "esp_spiffs.h"
+#include <sys/stat.h>
 
 #include <arpa/inet.h>
 
@@ -149,7 +150,7 @@ void wifi_init_softap(uint8_t channel, uint8_t ssid_hidden)
     strlcpy((char *)wifi_config.ap.ssid, wifi_name, sizeof(wifi_config.ap.ssid));
     wifi_config.ap.ssid_len = strlen(wifi_name);
 
-    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_AP, WIFI_BW_HT20)); // иначе не работает 11 канал
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20)); // иначе не работает 11 канал
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -325,7 +326,7 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     //    if (strlen(pdp_ip) > 0)
     //        l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", IP: %s", pdp_ip);
 
-    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", Error: <b>%s %s %s %s</b>", (result.measure.d_thsensor_error == 1) ? "TH" : "", (result.measure.d_dallas_sensor_error == 1) ? "DS" : "", (result.measure.d_mag_sensor_error == 1) ? "ACC/MAG" : "", (result.measure.d_nbiot_error == 1) ? "NBIoT" : "");
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", Error: <b>%s %s %s %s</b>", (result.measure.d_thsensor_error == 1) ? "TH" : "", (result.measure.d_dallas_sensor_error == 1) ? "DS" : "", (result.measure.d_mag_sensor_error == 1) ? "ACC/MAG" : "", (result.measure.d_exp_error == 1) ? "EXP" : "");
 
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", OPEN: <b>%s</b> ", (result.measure.open == 1) ? "1" : "0");
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", CLOSE: <b>%s</b> ", (result.measure.close == 1) ? "1" : "0");
@@ -545,8 +546,6 @@ esp_err_t d_get(httpd_req_t *req)
     return ESP_OK;
 };
 
-#define ESP_IMAGE_HEADER_MAGIC 0xE9 /*!< The magic word for the esp_image_header_t structure. */
-
 /*
  * Handle OTA file upload
  */
@@ -588,7 +587,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
             {
                 ESP_ERROR_CHECK(esp_ota_begin(ota_partition, OTA_SIZE_UNKNOWN, &ota_handle));
             }
-            else if (remaining == 0x50000) //SPIFFS Image
+            else if (remaining == 0x50000) // SPIFFS Image
             {
                 file_id = remaining;
                 ESP_ERROR_CHECK(esp_partition_erase_range(ota_partition, 0, 0x50000));
@@ -609,14 +608,14 @@ esp_err_t update_post_handler(httpd_req_t *req)
                 httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Flash write Error");
                 return ESP_FAIL;
             }
-            vTaskDelay(1);
+            vTaskDelay(10 / portTICK_PERIOD_MS);
         }
         else
             // spiffs.bin
             if (file_id == 0x50000)
             {
                 ESP_ERROR_CHECK(esp_partition_write(ota_partition, (req->content_len - remaining), (const void *)network_buf, recv_len));
-                vTaskDelay(1);
+                vTaskDelay(10 / portTICK_PERIOD_MS);
             }
 
         remaining -= recv_len;
@@ -648,7 +647,7 @@ esp_err_t update_post_handler(httpd_req_t *req)
             if (esp_partition_read(ota_partition, (req->content_len - remaining), (void *)network_buf, recv_len) == ESP_OK)
             {
                 ESP_ERROR_CHECK(esp_partition_write(storage_partition, (req->content_len - remaining), (const void *)network_buf, recv_len));
-                vTaskDelay(1);
+                vTaskDelay(10 / portTICK_PERIOD_MS);
             }
             remaining -= recv_len;
         }
@@ -753,7 +752,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
             async_resp_arg.fd = httpd_req_to_sockfd(req);
             async_resp_arg.hd = req->handle;
 
-            //ESP_LOGI(TAGH, "fd: %d", async_resp_arg.fd);
+            // ESP_LOGI(TAGH, "fd: %d", async_resp_arg.fd);
         }
         else
         {

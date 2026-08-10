@@ -7,22 +7,35 @@
 #include "cJSON.h"
 
 #include <sys/time.h>
+#include <time.h>
 
 #define MODEM_POWER GPIO_NUM_10
-// пробуждение от зарядки
-#define PIN_BATT GPIO_NUM_0
-#define PIN_INT_ACC GPIO_NUM_5
-#define PIN_WATER3 GPIO_NUM_1
+#define PIN_BATT GPIO_NUM_0 // пробуждение от зарядки
 #define PIN_LIGHT GPIO_NUM_4
 #define PIN_WATER1 GPIO_NUM_2
 #define PIN_WATER2 GPIO_NUM_3
 #define PIN_ONEWARE GPIO_NUM_8
 #define PIN_BUTTON_BOOT GPIO_NUM_9
 
+
+#if HW==11
+#define SCL_PIN (GPIO_NUM_18)
+#define SDA_PIN (GPIO_NUM_19)
+#define TXD_PIN (GPIO_NUM_6)
+#define RXD_PIN (GPIO_NUM_7)
+
+#define PIN_INT_ACC GPIO_NUM_1
+#define PIN_WATER3 GPIO_NUM_NC
+
+#else
 #define SCL_PIN (GPIO_NUM_6)
 #define SDA_PIN (GPIO_NUM_7)
 #define TXD_PIN (GPIO_NUM_19)
 #define RXD_PIN (GPIO_NUM_18)
+
+#define PIN_INT_ACC GPIO_NUM_5
+#define PIN_WATER3 GPIO_NUM_1
+#endif
 
 #define WIFI_CHANNEL 11
 #define AP_WIFI_SSID "THCam"
@@ -42,6 +55,7 @@
 #define READ_MAG_SENSOR BIT12
 #define TEST_MODE_UPDATED BIT13
 #define REBOOT_NOW BIT14
+#define END_DS18B20 BIT15
 
 #define ONEWIRE_MAX_DS18B20 1
 
@@ -56,20 +70,35 @@
 #define NOTYFY_SENSOR_MAGACC_GET_INT BIT8
 #define NOTYFY_SENSOR_SET_MAGACC BIT9
 #define NOTYFY_TEST BIT10
+#define NOTYFY_SENSOR_TH_HEATER_ON BIT11
+#define NOTYFY_SENSOR_TH_HEATER_OFF BIT12
+#define NOTYFY_EXPANDER_P1_PULLDIS BIT23
+#define NOTYFY_EXPANDER_P0_PULLDIS BIT24
+#define NOTYFY_EXPANDER_P1_PULLUP BIT25
+#define NOTYFY_EXPANDER_P0_PULLUP BIT26
+#define NOTYFY_EXPANDER_P1_UP BIT27
+#define NOTYFY_EXPANDER_P1_DOWN BIT28
+#define NOTYFY_EXPANDER_P0_UP BIT29
+#define NOTYFY_EXPANDER_P0_DOWN BIT30
+#define NOTYFY_EXPANDER_RESET BIT31
 
 #define NOTYFY_WIFI_ESPNOW BIT2
 #define NOTYFY_WIFI BIT1
+
+#define ESP_IMAGE_HEADER_MAGIC 0xE9 /*!< The magic word for the esp_image_header_t structure. */
 
 extern EventGroupHandle_t status_event_group;
 
 extern TaskHandle_t xHandleWifi;
 extern TaskHandle_t xTaskI2C;
+extern TaskHandle_t xTaskDIO;
 
 void modem_task(void *arg);
 void console_task(void *arg);
 void btn_task(void *arg);
 void wifi_task(void *arg);
 void dallas_task(void *arg);
+void dio_task(void *arg);
 void i2c_task(void *arg);
 
 esp_err_t read_nvs_menu();
@@ -81,11 +110,9 @@ int get_menu_json(char *buf);
 int get_menu_html(char *buf);
 void light_measure(int test_count);
 
-uint64_t dio_init();
 uint64_t dio_sleep(uint64_t wake_mask);
+uint64_t dio_check(uint64_t wake_mask);
 int get_charge();
-
-void nbiot_power_pin(const TickType_t xTicksToDelay);
 
 esp_err_t print_atcmd(const char *cmd, char *buffer);
 
@@ -96,6 +123,7 @@ esp_err_t read_nvs_id(const char *key, uint64_t *out_value);
 bool check_range(int x, int y, int z, int setx, int sety, int setz, int devi);
 
 float get_temperature_sensor();
+void water_cont_measure(int mode, bool printdata);
 
 char *get_datetime(time_t ttime);
 
@@ -129,7 +157,7 @@ typedef struct
             bool d_thsensor_error : 1;      // ошибка датчика
             bool d_dallas_sensor_error : 1; // ошибка датчика
             bool d_mag_sensor_error : 1;    // ошибка датчика
-            bool d_nbiot_error : 1;         // ошибка модуля NBIoT
+            bool d_exp_error : 1;         // ошибка расширителя диапазона PI4IOE5V6408
 
             bool open : 1;  // Дискретный сигнал открыто
             bool close : 1; // Дискретный сигнал закрыто
@@ -144,6 +172,7 @@ typedef struct
     float light;
     float water_temp;
     float water;
+    float waterk;
     float acc[3];
     float mag[3];
     float nbbattery;
@@ -160,18 +189,20 @@ typedef struct
 
 extern result_data_t result;
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f,\"Water\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\",\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"TAC\":%u,\"CI\":%u}"
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f,\"Water\":%.1f,\"WaterK\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\",\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"TAC\":%u,\"CI\":%u}"
 #define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2]
-#define OUT_MEASURE_VARS(prefix) prefix.nbbattery, prefix.rssi, prefix.light, prefix.water, prefix.water_temp, prefix.temp, prefix.humidity, prefix.flags, OUT_MEASURE_ACC_VARS(prefix), prefix.tac, prefix.ci
-#define OUT_MEASURE_HEADERS "Battery, RSSI, Light, Water, WaterTemp, Temp, Humidity, Flags, AccX, AccY, AccZ, MagX, MagY, MagZ, TAC, CI"
+#define OUT_MEASURE_VARS(prefix) prefix.nbbattery, prefix.rssi, prefix.light, prefix.water, prefix.waterk, prefix.water_temp, prefix.temp, prefix.humidity, prefix.flags, OUT_MEASURE_ACC_VARS(prefix), prefix.tac, prefix.ci
+#define OUT_MEASURE_HEADERS "Battery, RSSI, Light, Water, WaterK, WaterTemp, Temp, Humidity, Flags, AccX, AccY, AccZ, MagX, MagY, MagZ, TAC, CI"
 #define OUT_MEASURE_ACC_FORMATS "%.2f, %.2f, %.2f, %.2f, %.2f, %.2f"
-#define OUT_MEASURE_FORMATS "%.3f, %2.0f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, 0x%04X, " OUT_MEASURE_ACC_FORMATS ", %u, %u"
+#define OUT_MEASURE_FORMATS "%.3f, %2.0f, %3.1f, %3.1f, %2.1f, %2.1f, %2.1f, %2.1f, 0x%04X, " OUT_MEASURE_ACC_FORMATS ", %u, %u"
 
 #define HISTORY_SIZE 80
 extern result_data_t history[HISTORY_SIZE];
 extern uint8_t history_pos;
 
 extern unsigned int bootCount;
-extern int wait_max_counter;
+//extern int wait_max_counter;
 
 #define DATAFILE "data.csv"
+
+#define MEDIAN(a, p) (MAX(a[0].p, a[1].p) == MAX(a[1].p, a[2].p)) ? MAX(a[0].p, a[2].p) : MAX(a[1].p, MIN(a[0].p, a[2].p))

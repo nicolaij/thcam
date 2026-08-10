@@ -21,19 +21,19 @@ int NB_terminal_mode = 0;
 
 extern TaskHandle_t xHandleNB;
 extern TaskHandle_t xTaskI2C;
+extern TaskHandle_t xTaskDallas;
 
 menu_t menu[] = {
     {.id = "idn", .name = "Номер датчика", .izm = "", .val = 1, .min = 1, .max = 100000},
-    {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 10, .max = 100000},
+    {.id = "time", .name = "Период пробуждений", .izm = "мин", .val = 60, .min = 1, .max = 100000},
     {.id = "waitnb", .name = "Ожидание NB-IoT, WiFi", .izm = "мин", .val = 3, .min = 1, .max = 1000},
-    //{.id = "ubatt", .name = "Окончание зарядки батареи", .izm = "мВ", .val = 3500, .min = 3000, .max = 3600},
-    {.id = "ip", .name = "IP сервера", .izm = "", .val = ((10 << 24) | (179 << 16) | (40 << 8) | (20)), .min = INT32_MIN, .max = INT32_MAX},
+    {.id = "ipaddr", .name = "IP сервера", .izm = "", .val = ((172 << 0) | (30 << 8) | (239 << 16) | (20 << 24)), .min = INT32_MIN, .max = INT32_MAX}, // 172.30.239.20
     {.id = "tcpport", .name = "TCP порт сервера (0: не исп.)", .izm = "", .val = 48885, .min = 0, .max = 65535},
     {.id = "udpport", .name = "UDP порт сервера (0: не исп.)", .izm = "", .val = 0, .min = 0, .max = 65535},
     {.id = "MAC1", .name = "ESPNOW! Target MAC", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
     {.id = "MAC2", .name = "", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
-    //{.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
-    //{.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
+    {.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
+    {.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
     {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
@@ -330,12 +330,14 @@ void console_task(void *arg)
             // ESP_LOG_BUFFER_HEXDUMP(TAG, data, pos + 1, ESP_LOG_INFO);
             // ESP_LOGD(TAG, "Read bytes: '%s'", data);
             int n = atoi((const char *)data);
+            if (*data < '0')
+                n = -1;
             switch (selected_menu_id)
             {
             case 0:
                 switch (n)
                 {
-                case 0: // Выводим меню
+                case -1: // Выводим меню
 
                     ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
 
@@ -366,8 +368,14 @@ void console_task(void *arg)
                     ESP_LOGI("menu", "52. AT терминал NBIoT");
                     ESP_LOGI("menu", "53. Start WiFi");
                     ESP_LOGI("menu", "54. FreeRTOS INFO");
+                    ESP_LOGI("menu", "55. Reboot");
+                    ESP_LOGI("menu", "56. Старт измерений");
+                    ESP_LOGI("menu", "57. Буфер АЦП");
                     ESP_LOGI("menu", "60. Непрерывный опрос Mag/Acc");
-                    ESP_LOGI("menu", "61. Непрерывный опрос Light");
+                    ESP_LOGI("menu", "61. Быстрый непрерывный опрос Mag/Acc");
+                    ESP_LOGI("menu", "62. Непрерывный опрос Light");
+                    ESP_LOGI("menu", "63. Включить подогреватель датчика температуры/влажности");
+                    ESP_LOGI("menu", "64. Выключить подогреватель датчика температуры/влажности");
                     ESP_LOGI("menu", "-------------------------------------------");
                     break;
                 case 4: // IP сервера
@@ -409,7 +417,7 @@ void console_task(void *arg)
                     if (xHandleNB)
                         xTaskNotifyGive(xHandleNB); // если уже уснули
                     // vTaskSuspend(xHandleNB); // Suspend NBIot task
-                    wait_max_counter = 3;
+                    // wait_max_counter = 3;
                     break;
                 case 53: // WiFi
                     if (xHandleWifi)
@@ -417,30 +425,66 @@ void console_task(void *arg)
                     break;
                 case 54: // FreeRTOS INFO
                     ESP_LOGI("info", "Minimum free memory: %lu bytes", esp_get_minimum_free_heap_size());
+                    ESP_LOGI("dallas_task", "Task watermark: %d bytes", uxTaskGetStackHighWaterMark(xTaskDallas));
                     ESP_LOGI("wifi_task", "Task watermark: %d bytes", uxTaskGetStackHighWaterMark(xHandleWifi));
-                    // ESP_LOGI("adc_task", "Task watermark: %d bytes", uxTaskGetStackHighWaterMark(xHandleADC));
+                    ESP_LOGI("DIO_task", "Task watermark: %d bytes", uxTaskGetStackHighWaterMark(xTaskDIO));
+                    ESP_LOGI("i2c_task", "Task watermark: %d bytes", uxTaskGetStackHighWaterMark(xTaskI2C));
                     ESP_LOGI("modem_task", "Task watermark: %d bytes", uxTaskGetStackHighWaterMark(xHandleNB));
                     ESP_LOGI("console_task", "Task watermark: %d bytes", uxTaskGetStackHighWaterMark(NULL));
-                    /*
-                                        char statsbuf[600];
-                                        vTaskGetRunTimeStats(statsbuf);
-                                        printf(statsbuf);
-                    */
                     break;
+                case 55:
+                    xEventGroupSetBits(status_event_group, REBOOT_NOW);
+                    break;
+                case 56:
+                    if (xTaskDallas)
+                        xTaskNotifyGive(xTaskDallas);
+                    if (xTaskI2C)
+                        xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC | NOTYFY_SENSOR_MAGACC_GET_INT, eSetValueWithOverwrite);
+                    // water_cont_measure(false);
+                    // light_measure(10);
+                    if (xTaskDIO)
+                        xTaskNotifyGive(xTaskDIO);
+                    xTaskNotifyGive(xHandleWifi); // включаем WiFi;
+                    break;
+                case 57:
+                {
+                    int ll = 0;
+                    int n = 1;
+                    char buf[32];
+                    do
+                    {
+                        ll = getResult_Data(buf, n++);
+                        printf("%s", buf);
+                    } while (ll);
+                }
+                break;
                 case 60: // Непрерывный опрос MAG/ACC
                     xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC_CONT, eSetValueWithOverwrite);
                     // заканчиваем работу NBIoT
                     xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
                     // nbiot_power_off();
-                    wait_max_counter = 3;
+                    // wait_max_counter = 3;
                     break;
-                case 61:
+                case 61: // Непрерывный опрос MAG/ACC fast
+                    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC_SPEEDCONT, eSetValueWithOverwrite);
+                    // заканчиваем работу NBIoT
+                    xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
+                    // nbiot_power_off();
+                    // wait_max_counter = 3;
+                    break;
+                case 62:
                     xTaskNotify(xTaskI2C, NOTYFY_TEST, eSetValueWithOverwrite);
                     // заканчиваем работу NBIoT
                     xEventGroupSetBits(status_event_group, END_WORK_NBIOT);
                     // nbiot_power_off();
                     light_measure(10);
-                    wait_max_counter = 3;
+                    // wait_max_counter = 3;
+                    break;
+                case 63: // Подогреватель датчика температуры/влажности
+                    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH_HEATER_ON, eSetValueWithOverwrite);
+                    break;
+                case 64: // датчик температуры/влажности
+                    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH_HEATER_OFF, eSetValueWithOverwrite);
                     break;
                 default:
                     if (n > 0 && n <= sizeof(menu) / sizeof(menu_t))
@@ -536,6 +580,6 @@ void console_task(void *arg)
 
             pos = 0;
         }
-        vTaskDelay(1);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
