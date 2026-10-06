@@ -143,7 +143,12 @@ void modem_task(void *arg)
             do
             {
                 ESP_LOGD(TAG, "Try %d. Wakeup", ++d_nbiot_error_counter);
+                if (d_nbiot_error_counter % 2 != 0)
+                {
+                    nbiot_power_pin(1000 / portTICK_PERIOD_MS, MODEM_POWER);
+                }
                 gpio_set_level(MODEM_POWER, 0);
+                vTaskDelay(1 / portTICK_PERIOD_MS);
                 ee = at_reply_wait_OK("AT\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
             } while (ee != ESP_OK && d_nbiot_error_counter < 5);
 
@@ -246,7 +251,7 @@ void modem_task(void *arg)
                         if (chip == 7028)
                         {
                             gpio_set_level(MODEM_POWER, 1);
-                            vTaskDelay(1000 / portTICK_PERIOD_MS);
+                            vTaskDelay(600 / portTICK_PERIOD_MS);
                         }
                         else
                         {
@@ -341,6 +346,12 @@ void modem_task(void *arg)
             // Clock
             if (first_run_completed == false || cpsms0)
             {
+                if (chip == 7028)
+                {
+                    at_reply_wait_OK("AT+QCPMUCFG=1,4\r\n", (char *)data, 1000 / portTICK_PERIOD_MS); // Deep sleep mode
+                    at_reply_wait_OK("AT+QCPSMR=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);     // Enable low-power URC report
+                }
+
                 // AT+CURTC? AT+CTZR?
                 // ee = at_reply_wait_OK("AT+CTZR=?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                 if (chip != 7028)
@@ -354,6 +365,7 @@ void modem_task(void *arg)
                 //  #TAU 30sec * 3 , ACC 8 sec
                 //  at_reply_wait_OK("AT+CPSMS=1,,,\"10000011\",\"00000100\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                 //  TAU 25h 1*25, ACC 0 sec
+                // AT+CPSMS=1,,,"00111001","00000100"
                 at_reply_wait_OK("AT+CPSMS=1,,,\"00111001\",\"00000000\"\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
                 cpsms0 = false;
 
@@ -430,22 +442,24 @@ void modem_task(void *arg)
                         s = strstr((const char *)++s, ",");
                     }
                 }
-                int parsed = sscanf((const char *)++s, "\"%hhu.%hhu.%hhu.%hhu\"", &((uint8_t *)(&pdp_ip.addr))[0], &((uint8_t *)(&pdp_ip.addr))[1], &((uint8_t *)(&pdp_ip.addr))[2], &((uint8_t *)(&pdp_ip.addr))[3]);
-                if (parsed == 4)
+
+                int parsed = 0;
+                pdp_ip.addr = 0;
+                if (s)
+                    parsed = sscanf((const char *)++s, "\"%hhu.%hhu.%hhu.%hhu\"", &((uint8_t *)(&pdp_ip.addr))[0], &((uint8_t *)(&pdp_ip.addr))[1], &((uint8_t *)(&pdp_ip.addr))[2], &((uint8_t *)(&pdp_ip.addr))[3]);
+
+                // если нет нормального IP - рестарт модуля
+                if (parsed == 4 && esp_ip4_addr1(&pdp_ip) != 127 && pdp_ip.addr != 0)
                 {
-                    // если нет нормального IP - рестарт модуля
-                    if (esp_ip4_addr1(&pdp_ip) == 127)
-                    {
-                        ESP_LOGE(TAG, "IP: " IPSTR, IP2STR(&pdp_ip));
-                        print_atcmd("AT+CPOWD=1\r\n", data);
-                        first_run_completed = false;
-                        vTaskDelay(2000 / portTICK_PERIOD_MS);
-                        continue;
-                    }
-                    else
-                    {
-                        ESP_LOGI(TAG, "IP: " IPSTR, IP2STR(&pdp_ip));
-                    }
+                    ESP_LOGI(TAG, "IP: " IPSTR, IP2STR(&pdp_ip));
+                }
+                else
+                {
+                    ESP_LOGE(TAG, "IP: " IPSTR, IP2STR(&pdp_ip));
+                    // print_atcmd("AT+CPOWD=1\r\n", data);
+                    first_run_completed = false;
+                    vTaskDelay(2000 / portTICK_PERIOD_MS);
+                    continue;
                 }
             };
 

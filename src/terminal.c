@@ -299,9 +299,11 @@ void console_task(void *arg)
         }
         else
         {
-            vTaskDelay(50 / portTICK_PERIOD_MS);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
             continue;
         }
+
+        printf("%c", c);
 
         xEventGroupSetBits(status_event_group, SERIAL_TERMINAL_ACTIVE);
 

@@ -761,6 +761,7 @@ uint64_t dio_check(uint64_t wake_mask)
         xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P1_UP, eSetBits);
     }
 
+
     if (gpio_get_level(PIN_LIGHT) == 0)
     {
         wake_mask |= BIT64(PIN_LIGHT);
@@ -796,13 +797,13 @@ uint64_t dio_sleep(uint64_t wake_mask)
     if (gpio_get_level(PIN_BATT) == 0)
     {
         wake_mask |= BIT64(PIN_BATT);
-        // ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
+        //ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
     }
 
     if (gpio_get_level(PIN_INT_ACC) == 0)
     {
         wake_mask |= BIT64(PIN_INT_ACC);
-        // ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
+        //ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
     }
     /*
         if (gpio_get_level(PIN_WATER1) == 0)

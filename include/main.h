@@ -11,7 +11,7 @@
 
 #define MODEM_POWER GPIO_NUM_10
 #define PIN_BATT GPIO_NUM_0 // пробуждение от зарядки
-#define PIN_LIGHT GPIO_NUM_4
+#define PIN_LIGHT GPIO_NUM_4 // пробуждение от света
 #define PIN_WATER1 GPIO_NUM_2
 #define PIN_WATER2 GPIO_NUM_3
 #define PIN_ONEWARE GPIO_NUM_8

@@ -617,7 +617,7 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
 
         at_reply_wait_OK("AT+CPSMS=0\r\n", rx_buffer, 1000 / portTICK_PERIOD_MS);
 
-#ifdef LV_CMDON //sodk only
+#ifdef LV_CMDON // sodk only
         vTaskSuspend(xHandleADC);
 #endif
 
@@ -836,7 +836,8 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                                 else if (file_id == 0x50000) // spiffs.bin
                                 {
                                     const esp_partition_t *storage_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
-                                    ESP_ERROR_CHECK(esp_partition_erase_range(storage_partition, 0, 0x50000));
+                                    if (storage_partition)
+                                        ESP_ERROR_CHECK(esp_partition_erase_range(storage_partition, 0, 0x50000));
 
                                     int remaining = contenttotal;
                                     while (remaining > 0)
