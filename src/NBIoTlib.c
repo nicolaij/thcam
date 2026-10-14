@@ -1,6 +1,8 @@
 #include "NBIoTlib.h"
 #include "main.h"
 
+#include "freertos/semphr.h"
+
 #include "driver/gpio.h"
 
 #include "esp_timer.h"
@@ -22,6 +24,7 @@ psa_status_t psa_status = -1;
 static const char *TAG = "NBIoTlib";
 
 cJSON *firmware = NULL;
+static SemaphoreHandle_t firmware_mutex = NULL; // защита глобального firmware от гонок и утечек
 
 int32_t timezone = 3;
 
@@ -45,6 +48,9 @@ esp_err_t uart_init(uart_port_t uart_num, int rx_pin, int tx_pin)
     ESP_ERROR_CHECK(uart_set_pin(uart_num, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     psa_status = psa_crypto_init();
+
+    if (firmware_mutex == NULL)
+        firmware_mutex = xSemaphoreCreateMutex();
 
     return res;
 }
@@ -185,9 +191,12 @@ esp_err_t print_atcmd(const char *cmd, char *buffer)
     return ESP_OK;
 }
 
-esp_err_t wait_string(char *buffer, const char *swait, TickType_t ticks_to_wait)
+esp_err_t wait_string(char *buffer, const char *swait, TickType_t ticks_to_wait, size_t cap)
 {
     const char *err = "ERROR\r";
+
+    if (cap == 0)
+        return ESP_ERR_INVALID_ARG;
 
     int64_t start_time = esp_timer_get_time();
     char *pb = buffer;
@@ -195,22 +204,25 @@ esp_err_t wait_string(char *buffer, const char *swait, TickType_t ticks_to_wait)
     *pb = '\0';
     int lw = strlen(swait);
     int reqlen = (lw > 0) ? lw : 1;
-    // BUG
-    // reqlen = RX_BUF_SIZE - 1 - total_len;
 
     esp_err_t res = ESP_ERR_TIMEOUT;
     int len = -1;
-    size_t ssize;
-    // static size_t ssizemax = 0;
     do
     {
+        // не принимаем больше, чем помещается вместе с завершающим '\0'
+        int space = (int)cap - 1 - total_len;
+        if (space <= 0)
+        {
+            res = ESP_ERR_INVALID_SIZE; // буфер заполнен
+            break;
+        }
+        if (reqlen > space)
+            reqlen = space;
+
         if (len == 0) // если предыдущее чтение == 0
             len = uart_read_bytes(UART_NUM_1, pb, reqlen, 10 / portTICK_PERIOD_MS);
         else
             len = uart_read_bytes(UART_NUM_1, pb, reqlen, 0);
-
-        // uart_get_buffered_data_len(UART_NUM_1, &ssize);
-        // if (ssize > 1000) ESP_LOGD("wait_string", "RX len: %d (%d): %02x %02x %02x", len, (int)ssize, *pb, *(pb + 1), *(pb + 2));
 
         if (len > 0)
         {
@@ -253,7 +265,7 @@ esp_err_t wait_string(char *buffer, const char *swait, TickType_t ticks_to_wait)
     return res;
 }
 
-esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickType_t ticks_to_wait)
+esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickType_t ticks_to_wait, size_t cap)
 {
     esp_err_t res = ESP_ERR_TIMEOUT;
     int l = strlen(cmd);
@@ -267,7 +279,7 @@ esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickTyp
     if (ticks_to_wait == 0)
         return res;
 
-    res = wait_string(buffer, wait, ticks_to_wait);
+    res = wait_string(buffer, wait, ticks_to_wait, cap);
 
     ESP_LOGD(TAG, "Reply wait...:\"%s\"", (char *)buffer);
 
@@ -276,7 +288,8 @@ esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickTyp
 
 esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t ticks_to_wait)
 {
-    return at_reply_wait(cmd, "OK\r", buffer, ticks_to_wait);
+    // буфер здесь всегда data[RX_BUF_SIZE]; путь с send_data[TX_BUF_SIZE] зовёт at_reply_wait напрямую
+    return at_reply_wait(cmd, "OK\r", buffer, ticks_to_wait, RX_BUF_SIZE);
 }
 
 // ищем пробел, затем параметры через запятую
@@ -322,7 +335,7 @@ esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *res
         return ESP_ERR_INVALID_SIZE;
     }
 
-    wait_string(buffer, "OK\r", ticks_to_wait);
+    wait_string(buffer, "OK\r", ticks_to_wait, RX_BUF_SIZE);
 
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
 
@@ -355,7 +368,7 @@ esp_err_t at_csosend(const int socket, const char *data, const int len_data, cha
 
     uart_write_bytes(UART_NUM_1, "\r\n", 2);
 
-    res = wait_string(buffer, swait, 30000 / portTICK_PERIOD_MS);
+    res = wait_string(buffer, swait, 30000 / portTICK_PERIOD_MS, RX_BUF_SIZE);
 
     ESP_LOGD(TAG, "Receive string:\"%s\"", (char *)buffer);
 
@@ -372,6 +385,9 @@ char *get_datetime(time_t ttime)
 
 esp_err_t apply_command(const char *cmd, size_t len)
 {
+    if (firmware_mutex == NULL || xSemaphoreTake(firmware_mutex, portMAX_DELAY) != pdTRUE)
+        return ESP_FAIL;
+
     cJSON *json = cJSON_ParseWithLength(cmd, len);
     if (json)
     {
@@ -403,6 +419,7 @@ esp_err_t apply_command(const char *cmd, size_t len)
         item = cJSON_GetObjectItemCaseSensitive(json, "firmware");
         if (cJSON_IsObject(item))
         {
+            cJSON_Delete(firmware); // освобождаем предыдущую копию
             firmware = cJSON_Duplicate(item, 1);
 
             char *json_string = cJSON_PrintUnformatted(item);
@@ -416,23 +433,39 @@ esp_err_t apply_command(const char *cmd, size_t len)
     else
     {
         const char *er = cJSON_GetErrorPtr();
-        ESP_LOGW(TAG, "Parse err: %c in \"%s\"", *er, cmd);
+        if (er)
+            ESP_LOGW(TAG, "Parse err: %c in \"%s\"", *er, cmd);
+        else
+            ESP_LOGW(TAG, "Parse err in \"%s\"", cmd);
     }
     cJSON_Delete(json);
+
+    xSemaphoreGive(firmware_mutex);
 
     return ESP_OK;
 }
 
-// data - hex символы, len - запрашиваемая длина результата, return - длина результата
-int decode_fromHEX(const char *data, int len, char *result_data)
+// Проверка, что символ - шестнадцатеричная цифра (0-9, a-f, A-F)
+static inline bool is_hex_digit(char ch)
+{
+    return (ch >= '0' && ch <= '9') ||
+           (ch >= 'a' && ch <= 'f') ||
+           (ch >= 'A' && ch <= 'F');
+}
+
+// data - hex символы, len - запрашиваемая длина результата, cap - размер буфера result_data, return - длина результата
+int decode_fromHEX(const char *data, int len, char *result_data, size_t cap)
 {
     char *s = (char *)data;
     int i = 0;
-    while (i < len + 1) // строка должна заканчиваться \r
+    // не пишем больше, чем помещается вместе с завершающим '\0'
+    while (i < len && (size_t)(i + 1) < cap) // строка должна заканчиваться \r
     {
-        if (*s < '0' || *(s + 1) < '0' || *s > 'f' || *(s + 1) > 'f')
+        // обе цифры пары должны быть корректными, иначе считаем строку законченной
+        if (!is_hex_digit(*s) || !is_hex_digit(*(s + 1)))
             break;
-        char c[3] = {*(s++), *(s++), 0};
+        char c[3] = {*s, *(s + 1), 0};
+        s += 2;
         result_data[i] = (char)strtol(c, NULL, 16);
         i++;
     }
@@ -468,7 +501,7 @@ esp_err_t check_for_wait_cereg(char *message_data, char *result_data, int chip, 
     {
         ESP_LOGV("check_received_message", "Found: %s", s);
         // Ждем сообщения о наличии сети
-        if (wait_string(message_data, "+CEREG: 1", timewait) == ESP_OK)
+        if (wait_string(message_data, "+CEREG: 1", timewait, RX_BUF_SIZE) == ESP_OK)
         {
             ESP_LOGD("check_received_message", "Found +CEREG: 1");
             // ESP_LOGD(TAG, "Wait CEREG:\"%s\"", (char *)message_data);
@@ -492,9 +525,11 @@ esp_err_t check_received_message(char *message_data, char *result_data, int chip
         if (s)
         {
             char *ss = strchr(s, ',');
+            if (!ss)
+                return ESP_ERR_NOT_FOUND;
             int link_num = atoi(ss + 1);
             int l = snprintf(cmdbuf, sizeof(cmdbuf), "AT+CIPRXGET=2,%d\r\n", link_num);
-            ee = at_reply_wait_OK(cmdbuf, result_data, 1000 / portTICK_PERIOD_MS);
+            ee = at_reply_wait(cmdbuf, "OK\r", result_data, 1000 / portTICK_PERIOD_MS, TX_BUF_SIZE);
             if (ee == ESP_OK)
             {
                 //+CIPRXGET: 2,0,13,0
@@ -513,6 +548,9 @@ esp_err_t check_received_message(char *message_data, char *result_data, int chip
                             ss = strchr(ss + 1, 0x0A);
                             if (ss)
                             {
+                                // защита от выхода за буфер и отрицательной длины
+                                if (l < 0 || (ss + 1 - result_data) + (size_t)l >= TX_BUF_SIZE)
+                                    return ESP_ERR_NOT_FOUND;
                                 *(ss + 1 + l) = '\0';
                                 apply_command((const char *)(ss + 1), l);
                                 return ESP_OK;
@@ -535,7 +573,7 @@ esp_err_t check_received_message(char *message_data, char *result_data, int chip
             // len
             int len = atoi(s + 1);
             s = strchr(s + 1, ',');
-            if (decode_fromHEX(s + 1, len / 2, result_data) == len / 2)
+            if (decode_fromHEX(s + 1, len / 2, result_data, TX_BUF_SIZE) == len / 2)
             {
                 apply_command((const char *)result_data, len / 2);
                 return ESP_OK;
@@ -594,6 +632,9 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
 {
     esp_err_t ee = ESP_ERR_NOT_FOUND;
 
+    if (firmware_mutex == NULL || xSemaphoreTake(firmware_mutex, portMAX_DELAY) != pdTRUE)
+        return ee;
+
     // качаем firmware
     if (cJSON_IsObject(firmware))
     {
@@ -613,7 +654,10 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
         // const cJSON *cjcrc = cJSON_GetObjectItemCaseSensitive(firmware, "crc");
 
         if (!cJSON_IsString(cjserver) || !cJSON_IsString(cjpath))
+        {
+            xSemaphoreGive(firmware_mutex);
             return ESP_ERR_INVALID_ARG;
+        }
 
         at_reply_wait_OK("AT+CPSMS=0\r\n", rx_buffer, 1000 / portTICK_PERIOD_MS);
 
@@ -659,7 +703,7 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                     do
                     {
                         uart_get_buffered_data_len(UART_NUM_1, &ssize);
-                        ee = wait_string(rx_buffer, "\r\n", 10);
+                        ee = wait_string(rx_buffer, "\r\n", 10, RX_BUF_SIZE);
                         if (ee == ESP_OK)
                         {
                             s = strstr(rx_buffer, "+CHTTPERR:");
@@ -716,12 +760,12 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                                     }
 
                                     s = strchr(s + 1, ',');
-                                    int flag = atoi(s + 1);
                                     if (!s)
                                     {
                                         ESP_LOGE(TAG, "ERROR data ");
                                         break;
                                     }
+                                    int flag = atoi(s + 1);
 
                                     s = strchr(s + 1, ',');
                                     if (!s || atoi(s + 1) != contentlen)
@@ -731,14 +775,24 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                                     }
 
                                     s = strchr(s + 1, ',');
+                                    if (!s)
+                                    {
+                                        ESP_LOGE(TAG, "ERROR data ");
+                                        break;
+                                    }
                                     int hex_length = atoi(s + 1);
                                     s = strchr(s + 1, ',');
+                                    if (!s)
+                                    {
+                                        ESP_LOGE(TAG, "ERROR data ");
+                                        break;
+                                    }
                                     hs = s + 1;
 
                                     int l = 0;
                                     if (hex_length > 0)
                                     {
-                                        l = decode_fromHEX(hs, hex_length, tx_buffer);
+                                        l = decode_fromHEX(hs, hex_length, tx_buffer, TX_BUF_SIZE);
                                         if (hex_length != l)
                                         {
                                             ESP_LOGE(TAG, "Bad data %i of %i", l, hex_length);
@@ -887,9 +941,12 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
         } while (session_retry-- > 0);
 
         cJSON_Delete(firmware);
+        firmware = NULL;
 
         print_atcmd("AT+CPSMS=1\r\n", rx_buffer);
     }
+
+    xSemaphoreGive(firmware_mutex);
 
     return ee;
 };

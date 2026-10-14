@@ -25,8 +25,6 @@ static const char *TAG = "DIO";
 #define QUEUE_LENGTH 1
 #define ITEM_SIZE sizeof(uint64_t)
 
-extern TaskHandle_t xTaskDallas;
-
 QueueHandle_t xQueue = NULL;
 uint8_t ucQueueStorageArea[QUEUE_LENGTH * ITEM_SIZE];
 
@@ -52,7 +50,7 @@ int *adcresult32_2 = (int *)(adcresult + points * sizeof(int));
 
 const TickType_t pulldown_switch_time = 10;
 
-volatile bool adc_switch = 1;
+volatile bool adc_switch = 0;
 
 /*
 
@@ -194,12 +192,12 @@ static void water_continuous_adc_init()
     adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
     int num = 0;
 
-    adc_pattern[num].atten = ADC_ATTEN_DB_12;
+    adc_pattern[num].atten = ADC_ATTEN_DB_0;
     adc_pattern[num].channel = PIN_WATER1;
     adc_pattern[num].unit = ADC_UNIT_1;
     adc_pattern[num].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
     num++;
-    adc_pattern[num].atten = ADC_ATTEN_DB_12;
+    adc_pattern[num].atten = ADC_ATTEN_DB_0;
     adc_pattern[num].channel = PIN_WATER2;
     adc_pattern[num].unit = ADC_UNIT_1;
     adc_pattern[num].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
@@ -214,11 +212,14 @@ static void water_continuous_adc_init()
     ESP_ERROR_CHECK(adc_continuous_config(cont_handle, &dig_cfg));
 }
 
+/*
 static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
     BaseType_t mustYield = pdFALSE;
+    uint32_t current_output_mask = GPIO.enable.val;
 
-    if (adc_switch)
+    // if (adc_switch)
+    if (current_output_mask & (1ULL << PIN_WATER1))
     {
         // gpio_set_direction(PIN_WATER1, GPIO_MODE_INPUT); // 10k
         // gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT);
@@ -231,7 +232,7 @@ static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_c
         // Writes a 1 to the Clear register for bit 1 -> Drives GPIO LOW
         GPIO.out_w1tc.val = (1UL << PIN_WATER2);
 
-        adc_switch = 0;
+        // adc_switch = 0;
     }
     else
     {
@@ -246,9 +247,43 @@ static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_c
         // Writes a 1 to the Clear register for bit 1 -> Drives GPIO LOW
         GPIO.out_w1tc.val = (1UL << PIN_WATER1);
 
-        adc_switch = 1;
+        // adc_switch = 1;
     }
 
+    return (mustYield == pdTRUE);
+}
+*/
+
+static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
+{
+    BaseType_t mustYield = pdFALSE;
+
+    if (adc_switch)
+    {
+        // Clear bit 0 in enable register -> Configures GPIO as INPUT
+        GPIO.enable_w1tc.val = (1UL << PIN_WATER1);
+        // Set bit 1 in enable register -> Configures GPIO as OUTPUT
+        GPIO.enable_w1ts.val = (1UL << PIN_WATER2);
+        // Writes a 1 to the Clear register for bit 1 -> Drives GPIO LOW
+        GPIO.out_w1tc.val = (1UL << PIN_WATER2);
+
+        // xTaskNotifyFromISR(xTaskI2C, NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P0_DOWN, eSetBits, &mustYield);
+        adc_switch = 0;
+    }
+    else
+    {
+        // Clear bit 0 in enable register -> Configures GPIO as INPUT
+        GPIO.enable_w1tc.val = (1UL << PIN_WATER2);
+        // Set bit 1 in enable register -> Configures GPIO as OUTPUT
+        GPIO.enable_w1ts.val = (1UL << PIN_WATER1);
+        // Writes a 1 to the Clear register for bit 1 -> Drives GPIO LOW
+        GPIO.out_w1tc.val = (1UL << PIN_WATER1);
+
+        // xTaskNotifyFromISR(xTaskI2C, NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P1_DOWN, eSetBits, &mustYield);
+        adc_switch = 1;
+    }
+    // ESP_DRAM_LOGI(TAG, "s_conv_done_cb %i %i", adc_switch, mustYield);
+    // portYIELD_FROM_ISR(1);
     return (mustYield == pdTRUE);
 }
 
@@ -260,7 +295,7 @@ void water_cont_prepare()
     adc_cali_curve_fitting_config_t cali_config1 = {
         .unit_id = ADC_UNIT_1,
         .chan = PIN_WATER1,
-        .atten = ADC_ATTEN_DB_12,
+        .atten = ADC_ATTEN_DB_0,
         .bitwidth = SOC_ADC_DIGI_MAX_BITWIDTH,
     };
     ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_config1, &cal_handle1));
@@ -268,7 +303,7 @@ void water_cont_prepare()
     adc_cali_curve_fitting_config_t cali_config2 = {
         .unit_id = ADC_UNIT_1,
         .chan = PIN_WATER2,
-        .atten = ADC_ATTEN_DB_12,
+        .atten = ADC_ATTEN_DB_0,
         .bitwidth = SOC_ADC_DIGI_MAX_BITWIDTH,
     };
     ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_config2, &cal_handle2));
@@ -277,6 +312,8 @@ void water_cont_prepare()
         .on_conv_done = s_conv_done_cb,
     };
     ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(cont_handle, &cbs, NULL));
+
+    // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P0_UP, eSetBits);
 }
 
 // Функция сравнения для qsort (сортировка float по возрастанию)
@@ -302,25 +339,27 @@ void water_cont_measure(int mode, bool printdata)
 
     ESP_LOGI("adc", "water_cont_measure");
 
-    if (mode == 1) // 10k
+    switch (mode)
     {
+    case 1: // 10k
         xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P0_UP, eSetBits);
-    }
-
-    if (mode == 3) // 100k
-    {
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_PULLUP | NOTYFY_EXPANDER_P0_PULLUP, eSetBits);
-    }
-
-    if (mode == 2) // 50k
-    {
+        break;
+    case 2: // 50k
         ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_PULLUP_ONLY));
         ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
-    }
-    else
-    {
+        break;
+    case 3: // 100k
+        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_PULLUP | NOTYFY_EXPANDER_P0_PULLUP, eSetBits);
+        break;
+    case 5: // 50k / 50k
+        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P0_DOWN, eSetBits);
+        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_PULLUP_ONLY));
+        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
+        break;
+    default:
         ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_FLOATING));
         ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_FLOATING));
+        break;
     }
 
     // ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
@@ -330,8 +369,8 @@ void water_cont_measure(int mode, bool printdata)
 
     ESP_ERROR_CHECK(adc_continuous_flush_pool(cont_handle));
 
-    adc_switch = 1;
-    vTaskDelay(40 / portTICK_PERIOD_MS);
+    adc_switch = 0;
+    vTaskDelay(20 / portTICK_PERIOD_MS);
 
     ESP_ERROR_CHECK(adc_continuous_start(cont_handle));
     // ESP_LOGI("adc", "adc_continuous_start");
@@ -360,182 +399,276 @@ void water_cont_measure(int mode, bool printdata)
     // xTaskNotify(xTaskI2C, (NOTYFY_EXPANDER_RESET), eSetBits);
     // xTaskNotify(xTaskI2C, (NOTYFY_EXPANDER_P0_PULLDIS | NOTYFY_EXPANDER_P1_PULLDIS), eSetBits);
 
+    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_FLOATING));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_FLOATING));
+
     if (len > 0)
     {
         ESP_LOGI(TAG, "latest ret is %x, ret_num is %" PRIu32 " bytes, total len: %i", ret, ret_num, len);
 
         water_min = 0;
         water_max = 0;
-        water_cnt = 0;
+        water_cnt = 20;
         water_corr = 0;
         water_corr_cnt = 0;
-        int cnt = 0;     // счетчик данных
-        int i = len / 2; // половина
+        int cnt = 0;        // счетчик данных
+        int nmbr = len / 2; // половина
 
         int v1 = 0;
         int v2 = 0;
 
-        int sum_x = 0;
-        int sum_y = 0;
-        int sum_xx = 0;
-        int sum_xy = 0;
-        int x = 0;
+        int sum_w1 = 0;
+        int sum_w1_end = 0;
+        int count_w1 = 0;
+        int sum_w2 = 0;
+        int sum_w2_end = 0;
+        int count_w2 = 0;
 
         float k = 0.0f;
         float b = 0.0f;
 
-#define DATASZ (points * sizeof(int) / BLOCKSIZE / 2)
+        int upper_mv = 0;
+        adc_cali_raw_to_voltage(cal_handle1, 4095, &upper_mv);
+        ESP_LOGD("ADC", "Upper limit ADC1: %d mV", upper_mv);
+        adc_cali_raw_to_voltage(cal_handle2, 4095, &upper_mv);
+        ESP_LOGD("ADC", "Upper limit ADC2: %d mV", upper_mv);
 
-        float sum_k = 0.0f;
-        float data_k[DATASZ];
-
-        float sum_b = 0.0f;
-        float data_b[DATASZ];
-
-        int count_k = 0;
-
-        while (i < len)
+        // Первый блок измерений АЦП
+        adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[0];
+        for (int i = 0; i < 20; i++)
         {
-            adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[i];
             uint32_t data = p->type2.data;
-
-            if (p->type2.channel == PIN_WATER2)
-            {
-                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, data, &v2));
-            }
 
             if (p->type2.channel == PIN_WATER1)
             {
                 ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, data, &v1));
-                v2 = 0;
-            }
-
-            if ((cnt % 20) == 0)
-            {
-                x = 0;
-                sum_x = 0;
-                sum_y = 0;
-                sum_xx = 0;
-                sum_xy = 0;
+                sum_w1 += v1;
+                count_w1++;
             }
 
             if (p->type2.channel == PIN_WATER2)
             {
-                if (printdata)
-                {
-                    printf("%d: %d,%d\n", cnt, v1, v2);
-                }
-
-                if (cnt % 40 == 3)
-                {
-                    water_min += v2;
-                    water_cnt++;
-                    water_corr += v1;
-                    water_corr_cnt++;
-                }
-                else if (cnt % 40 == 23)
-                {
-                    water_min += v1;
-                    water_cnt++;
-                    water_corr += v2;
-                    water_corr_cnt++;
-                }
-                else if (cnt % 40 == 19)
-                {
-                    water_max += v2;
-                }
-                else if (cnt % 40 == 39)
-                {
-                    water_max += v1;
-                }
-
-                if (cnt % 2 == 1)
-                {
-                    x++;
-                    sum_x += x;
-                    sum_xx += x * x;
-
-                    if (cnt % 40 < 20)
-                    {
-                        sum_y += v2;
-                        sum_xy += x * v2;
-                    }
-                    else
-                    {
-                        sum_y += v1;
-                        sum_xy += x * v1;
-                    }
-                }
-
-                if (cnt % 20 == 19)
-                {
-                    data_k[count_k] = (10.0f * sum_xy - sum_x * sum_y) / (10.0f * sum_xx - sum_x * sum_x);
-                    data_b[count_k] = (sum_y - (k)*sum_x) / 10.0f;
-
-                    if (printdata)
-                        printf("%d: %.1f,%.1f\n", x, data_k[count_k], data_b[count_k]);
-
-                    count_k++;
-                }
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, data, &v2));
+                sum_w2 += v2;
+                count_w2++;
             }
-            cnt++;
-            i += SOC_ADC_DIGI_RESULT_BYTES;
-        }
+            p++;
+        };
 
-        if (printdata)
-            printf("\n");
-
-        qsort(data_k, DATASZ, sizeof(float), compare_floats);
-        qsort(data_b, DATASZ, sizeof(float), compare_floats);
-
-#define CHOSEN_COUNT 20
-
-        // Поиск подмассива с минимальным разбросом (Max - Min)
-        int best_startk = 0;
-        float min_rangek = data_k[CHOSEN_COUNT - 1] - data_k[0];
-        int best_startb = 0;
-        float min_rangeb = data_b[CHOSEN_COUNT - 1] - data_b[0];
-
-        for (int i = 1; i <= (DATASZ - CHOSEN_COUNT); i++)
+        if (count_w1 != 10 || count_w2 != 10)
         {
-            float current_rangek = data_k[i + CHOSEN_COUNT - 1] - data_k[i];
-            if (current_rangek < min_rangek)
-            {
-                min_rangek = current_rangek;
-                best_startk = i;
-            }
-
-            float current_rangeb = data_b[i + CHOSEN_COUNT - 1] - data_b[i];
-            if (current_rangeb < min_rangeb)
-            {
-                min_rangeb = current_rangeb;
-                best_startb = i;
-            }
+            ESP_LOGE("Water", "Data error! (%d,%d)", count_w1, count_w2);
+            return;
         }
 
-        int count2_k = 0;
-        sum_k = 0;
-        sum_b = 0;
-        for (int i = 0; i < CHOSEN_COUNT; i++)
+        water_max = sum_w1 + sum_w2;
+
+        // половина измерений
+        sum_w1 = 0;
+        count_w1 = 0;
+        sum_w2 = 0;
+        count_w2 = 0;
+        water_min = 0;
+        p = ((adc_digi_output_data_t *)&adcresult[nmbr]); // вторая половина измерений
+
+        for (int i = 0; i < 10; i++) // усредняем по 10-ти измерениям
         {
-            sum_k += data_k[i + best_startk];
-            sum_b += data_b[i + best_startb];
-            count2_k++;
+            if (p->type2.channel == PIN_WATER1)
+            {
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 2)->type2.data, &v1)); // второе измерение
+                sum_w1 += v1;
+
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 18)->type2.data, &v1)); // последнее измерение
+                sum_w1_end += v1;
+
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 3)->type2.data, &v2)); // второе измерение
+                water_min = water_min + v2;
+
+                count_w1++;
+
+                p = p + 20;
+            }
+
+            if ((p + 1)->type2.channel == PIN_WATER2)
+            {
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, (p + 3)->type2.data, &v2)); // второе измерение
+                sum_w2 += v2;
+
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 19)->type2.data, &v2)); // последнее измерение
+                sum_w2_end += v2;
+
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 2)->type2.data, &v1)); // второе измерение
+                water_min = water_min + v1;
+
+                count_w2++;
+
+                p = p + 20;
+            }
         }
 
-        k = sum_k / count2_k;
-        b = sum_b / count2_k;
+        if (count_w1 != 10 || count_w2 != 10)
+        {
+            ESP_LOGE("Water", "Data error 2! (%d,%d)", count_w1, count_w2);
+            return;
+        }
 
-        int w2_max = 0;
-        float w2 = 0;
-        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, 4095, &w2_max));
+        /*
+    while (nmbr < len)
+    {
+        adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[nmbr];
+        uint32_t data = p->type2.data;
 
-        if (w2_max != water_corr / water_corr_cnt)
-            w2 = ((float)w2_max - b) * 100.0f / (w2_max - water_corr / water_corr_cnt);
+        if (p->type2.channel == PIN_WATER2)
+        {
+            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, data, &v2));
+        }
 
-        // result.measure.water2_last = get_menu_id("r1.2") * water_max / water_max_cnt / (v_power - water_max / water_max_cnt);
-        ESP_LOGI("Water", "min: %d мВ, max: %d мВ, (%d) k: %.1f, b: %.1f, %.1f%%", water_min / water_cnt, water_max / water_cnt, count2_k, k, b, w2);
-        result.measure.water = w2;
+        if (p->type2.channel == PIN_WATER1)
+        {
+            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, data, &v1));
+            v2 = 0;
+        }
+
+                    if ((cnt % 20) == 0)
+                    {
+                        x = 0;
+                        sum_x = 0;
+                        sum_y = 0;
+                        sum_xx = 0;
+                        sum_xy = 0;
+                    }
+
+                    if (p->type2.channel == PIN_WATER2)
+                    {
+                        if (printdata)
+                        {
+                            printf("%d: %d,%d (%ld)\n", cnt, v1, v2, data);
+                        }
+
+                        if (cnt % 40 == 3)
+                        {
+                            water_min += v2;
+                            water_cnt++;
+                            water_corr += v1;
+                            water_corr_cnt++;
+                        }
+                        else if (cnt % 40 == 23)
+                        {
+                            water_min += v1;
+                            water_cnt++;
+                            water_corr += v2;
+                            water_corr_cnt++;
+                        }
+                        else if (cnt % 40 == 19)
+                        {
+                            water_max += v2;
+                        }
+                        else if (cnt % 40 == 39)
+                        {
+                            water_max += v1;
+                        }
+
+                        if (cnt % 2 == 1)
+                        {
+                            x++;
+                            sum_x += x;
+                            sum_xx += x * x;
+
+                            if (cnt % 40 < 20)
+                            {
+                                sum_y += v2;
+                                sum_xy += x * v2;
+                            }
+                            else
+                            {
+                                sum_y += v1;
+                                sum_xy += x * v1;
+                            }
+                        }
+
+                        if (cnt % 20 == 19)
+                        {
+                            data_k[count_k] = (10.0f * sum_xy - sum_x * sum_y) / (10.0f * sum_xx - sum_x * sum_x);
+                            data_b[count_k] = (sum_y - (k)*sum_x) / 10.0f;
+
+                            if (printdata)
+                                printf("%d: %.1f,%.1f\n", x, data_k[count_k], data_b[count_k]);
+
+                            count_k++;
+                        }
+                    }
+
+
+        if (p->type2.channel == PIN_WATER2)
+        {
+            if (printdata)
+            {
+                printf("%d: %d,%d (%ld)\n", cnt, v1, v2, data);
+            }
+        };
+
+        cnt++;
+        nmbr += SOC_ADC_DIGI_RESULT_BYTES;
+    }
+
+    if (printdata)
+        printf("\n");
+
+
+            qsort(data_k, DATASZ, sizeof(float), compare_floats);
+            qsort(data_b, DATASZ, sizeof(float), compare_floats);
+
+    #define CHOSEN_COUNT 20
+
+            // Поиск подмассива с минимальным разбросом (Max - Min)
+            int best_startk = 0;
+            float min_rangek = data_k[CHOSEN_COUNT - 1] - data_k[0];
+            int best_startb = 0;
+            float min_rangeb = data_b[CHOSEN_COUNT - 1] - data_b[0];
+
+            for (int i = 1; i <= (DATASZ - CHOSEN_COUNT); i++)
+            {
+                float current_rangek = data_k[i + CHOSEN_COUNT - 1] - data_k[i];
+                if (current_rangek < min_rangek)
+                {
+                    min_rangek = current_rangek;
+                    best_startk = i;
+                }
+
+                float current_rangeb = data_b[i + CHOSEN_COUNT - 1] - data_b[i];
+                if (current_rangeb < min_rangeb)
+                {
+                    min_rangeb = current_rangeb;
+                    best_startb = i;
+                }
+            }
+
+            int count2_k = 0;
+            sum_k = 0;
+            sum_b = 0;
+            for (int i = 0; i < CHOSEN_COUNT; i++)
+            {
+                sum_k += data_k[i + best_startk];
+                sum_b += data_b[i + best_startb];
+                count2_k++;
+            }
+
+            k = sum_k / count2_k;
+            b = sum_b / count2_k;
+
+            float w2 = 0;
+
+            if (upper_mv != water_corr / water_corr_cnt)
+                w2 = ((float)upper_mv - b) * 100.0f / (upper_mv - water_corr / water_corr_cnt);
+    */
+        // среднее между 1 и 9-ым измерением
+        int avg = ((sum_w1 + sum_w2) / 20 + (sum_w1_end + sum_w2_end) / 20) / 2;
+        b = 100.0f - 100.0f / ((water_max - water_min) / 20) * (((sum_w1 + sum_w2) - water_min) / 20);
+        if (b < 0)
+            b = 0;
+        k = ((sum_w1_end + sum_w2_end) - (sum_w1 + sum_w2)) / 20 / 8.0f;
+        ESP_LOGI("Water", "min: %d мВ, max: %d мВ, Water: (%d) %.1f%%, k: %.3f%%", water_min / 20, water_max / 20, avg, b, k);
+        result.measure.water = b;
         result.measure.waterk = k;
     }
     result.ttime = time(0);
@@ -636,13 +769,17 @@ void dio_task(void *arg)
 
     water_cont_prepare();
 
+    taskYIELD();
+
     light_adc_init();
+
+    taskYIELD();
 
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Ожидаем уведомления безконечно, для повторного поиска
 
-        water_cont_measure(1, false);
+        water_cont_measure(5, false);
 
         // vTaskDelay(1);
 
@@ -712,11 +849,11 @@ uint64_t dio_check(uint64_t wake_mask)
 
     if (bootCount % 2 == 1)
     {
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP, eSetBits);
+        // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP, eSetBits);
     }
     else
     {
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP, eSetBits);
+        // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP, eSetBits);
     }
     // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P0_DOWN, eSetBits);
 
@@ -758,9 +895,8 @@ uint64_t dio_check(uint64_t wake_mask)
     }
     else
     {
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P1_UP, eSetBits);
+        // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P1_UP, eSetBits);
     }
-
 
     if (gpio_get_level(PIN_LIGHT) == 0)
     {
@@ -797,13 +933,13 @@ uint64_t dio_sleep(uint64_t wake_mask)
     if (gpio_get_level(PIN_BATT) == 0)
     {
         wake_mask |= BIT64(PIN_BATT);
-        //ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
+        // ESP_ERROR_CHECK(gpio_hold_en(PIN_BATT));
     }
 
     if (gpio_get_level(PIN_INT_ACC) == 0)
     {
         wake_mask |= BIT64(PIN_INT_ACC);
-        //ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
+        // ESP_ERROR_CHECK(gpio_hold_en(PIN_INT_ACC));
     }
     /*
         if (gpio_get_level(PIN_WATER1) == 0)
@@ -861,7 +997,7 @@ void btn_task(void *arg)
     {
         vTaskDelay(10 / portTICK_PERIOD_MS);
 
-        if (wait == 1000) // демонстрационный режим, без сна
+        if (wait == 1000 || sleeptime <= wait) // демонстрационный режим, без сна
         {
             if ((esp_timer_get_time() - start_time) > (sleeptime * 60LL * 1000000LL))
             {
@@ -875,6 +1011,8 @@ void btn_task(void *arg)
                     xTaskNotifyGive(xTaskDIO);
 
                 start_time = esp_timer_get_time();
+
+                vTaskDelay(3000 / portTICK_PERIOD_MS);
 
                 xEventGroupSetBits(status_event_group, TEST_MODE_UPDATED);
             }
@@ -897,7 +1035,7 @@ void btn_task(void *arg)
                 ESP_LOGI("IO", "Button long press! %d", output + 1);
                 debounce = 0;
 
-                water_cont_measure(1, true);
+                water_cont_measure(5, true);
 
                 // gpio_config_t io_conf = {};
                 /*
@@ -964,13 +1102,15 @@ void btn_task(void *arg)
 
                 if (xTaskDIO)
                     xTaskNotifyGive(xTaskDIO);
+                portYIELD();
                 if (xTaskDallas)
                     xTaskNotifyGive(xTaskDallas);
+                portYIELD();
                 if (xTaskI2C)
                     xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetValueWithOverwrite);
                 // water_cont_measure(false);
                 // light_measure(10);
-
+                portYIELD();
                 xTaskNotifyGive(xHandleWifi); // включаем WiFi;
             };
         }

@@ -72,14 +72,19 @@
 #define NOTYFY_TEST BIT10
 #define NOTYFY_SENSOR_TH_HEATER_ON BIT11
 #define NOTYFY_SENSOR_TH_HEATER_OFF BIT12
-#define NOTYFY_EXPANDER_P1_PULLDIS BIT23
-#define NOTYFY_EXPANDER_P0_PULLDIS BIT24
-#define NOTYFY_EXPANDER_P1_PULLUP BIT25
-#define NOTYFY_EXPANDER_P0_PULLUP BIT26
-#define NOTYFY_EXPANDER_P1_UP BIT27
-#define NOTYFY_EXPANDER_P1_DOWN BIT28
-#define NOTYFY_EXPANDER_P0_UP BIT29
-#define NOTYFY_EXPANDER_P0_DOWN BIT30
+
+#define NOTYFY_WPC_CHECK BIT13
+#define NOTYFY_WPC_SETUP BIT14
+
+#define NOTYFY_EXPANDER_ONLY BIT22
+#define NOTYFY_EXPANDER_P0_PULLDIS BIT23
+#define NOTYFY_EXPANDER_P1_PULLDIS BIT24
+#define NOTYFY_EXPANDER_P0_PULLUP BIT25
+#define NOTYFY_EXPANDER_P1_PULLUP BIT26
+#define NOTYFY_EXPANDER_P0_UP BIT27
+#define NOTYFY_EXPANDER_P1_UP BIT28
+#define NOTYFY_EXPANDER_P0_DOWN BIT29
+#define NOTYFY_EXPANDER_P1_DOWN BIT30
 #define NOTYFY_EXPANDER_RESET BIT31
 
 #define NOTYFY_WIFI_ESPNOW BIT2
@@ -92,6 +97,7 @@ extern EventGroupHandle_t status_event_group;
 extern TaskHandle_t xHandleWifi;
 extern TaskHandle_t xTaskI2C;
 extern TaskHandle_t xTaskDIO;
+extern TaskHandle_t xTaskDallas;
 
 void modem_task(void *arg);
 void console_task(void *arg);
@@ -188,6 +194,11 @@ typedef struct
 } result_data_t;
 
 extern result_data_t result;
+
+// Сырые показания акселерометра (мг) последнего измерения (для калибровки)
+extern int acc_raw_mg[3];
+// Сглаженные сырые показания акселерометра (мг) - для фиксации в калибровке
+extern int acc_raw_avg[3];
 
 #define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f,\"Water\":%.1f,\"WaterK\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\",\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"TAC\":%u,\"CI\":%u}"
 #define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2]

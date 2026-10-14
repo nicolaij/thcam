@@ -32,8 +32,6 @@ menu_t menu[] = {
     {.id = "udpport", .name = "UDP порт сервера (0: не исп.)", .izm = "", .val = 0, .min = 0, .max = 65535},
     {.id = "MAC1", .name = "ESPNOW! Target MAC", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
     {.id = "MAC2", .name = "", .izm = "", .val = 0, .min = 0, .max = INT32_MAX},
-    {.id = "r1.1", .name = "Резистор ADC1", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
-    {.id = "r1.2", .name = "Резистор ADC2", .izm = "Ом", .val = 10000, .min = 1, .max = 20000000},
     {.id = "openaccX", .name = "ACC Положение Открыто", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openaccY", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
     {.id = "openaccZ", .name = "", .izm = "", .val = 0, .min = -9999, .max = 9999},
@@ -52,6 +50,13 @@ menu_t menu[] = {
     {.id = "closemage", .name = "", .izm = "", .val = 0, .min = 0, .max = 1},
     {.id = "deviation", .name = "Допустимое отклонение +-", .izm = "", .val = 500, .min = 0, .max = 1000},
     {.id = "lightrang", .name = "Переключение диапазона освещен.", .izm = "%", .val = 50, .min = 0, .max = 100},
+    // Калибровка акселерометра по двум точкам: сырые показания (в мг) при положении оси -1g и +1g
+    {.id = "calaccX0", .name = "ACC Калибр. X при -1g", .izm = "мг", .val = -1000, .min = -4000, .max = 4000},
+    {.id = "calaccX1", .name = "ACC Калибр. X при +1g", .izm = "мг", .val = 1000, .min = -4000, .max = 4000},
+    {.id = "calaccY0", .name = "ACC Калибр. Y при -1g", .izm = "мг", .val = -1000, .min = -4000, .max = 4000},
+    {.id = "calaccY1", .name = "ACC Калибр. Y при +1g", .izm = "мг", .val = 1000, .min = -4000, .max = 4000},
+    {.id = "calaccZ0", .name = "ACC Калибр. Z при -1g", .izm = "мг", .val = -1000, .min = -4000, .max = 4000},
+    {.id = "calaccZ1", .name = "ACC Калибр. Z при +1g", .izm = "мг", .val = 1000, .min = -4000, .max = 4000},
     //{.id = "kbatt", .name = "Калибровка напр. батареи (ADC0)", .izm = "", .val = 448, .min = 1, .max = 10000},
 };
 
@@ -171,6 +176,11 @@ esp_err_t set_menu_val_by_id(const char *id, int value)
             if (menu[i].val != value)
             {
                 err = nvs_open("storage", NVS_READWRITE, &my_handle);
+                if (err != ESP_OK)
+                {
+                    ESP_LOGE("storage", "Error (%s) opening NVS handle!", esp_err_to_name(err));
+                    break;
+                }
 
                 ESP_LOGD("NVS", "Write  \"%s\" : \"%i\"", menu[i].id, value);
                 err = nvs_set_i32(my_handle, id, value);
@@ -267,6 +277,87 @@ int get_menu_html(char *buf)
     return pos;
 }
 
+// Запросить измерение акселерометра для калибровки: 5 выборок, среднее (сырые значения, мг)
+static bool acc_cal_read(int raw[3])
+{
+    long sum[3] = {0, 0, 0};
+    int n = 0;
+    for (int k = 0; k < 5; k++)
+    {
+        xEventGroupClearBits(status_event_group, READ_MAG_SENSOR);
+        // при первом запросе настраиваем датчик, далее только читаем
+        uint32_t bits = (k == 0) ? (NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC) : NOTYFY_SENSOR_MAGACC;
+        xTaskNotify(xTaskI2C, bits, eSetValueWithOverwrite);
+        if (xEventGroupWaitBits(status_event_group, READ_MAG_SENSOR, pdTRUE, pdFALSE, 3000 / portTICK_PERIOD_MS) & READ_MAG_SENSOR)
+        {
+            sum[0] += acc_raw_mg[0];
+            sum[1] += acc_raw_mg[1];
+            sum[2] += acc_raw_mg[2];
+            n++;
+        }
+        vTaskDelay(200 / portTICK_PERIOD_MS);
+    }
+
+    if (n == 0)
+        return false;
+
+    raw[0] = sum[0] / n;
+    raw[1] = sum[1] / n;
+    raw[2] = sum[2] / n;
+    return true;
+}
+
+// Автоматическая калибровка акселерометра: 6 положений платы
+static void acc_calibration(void)
+{
+    static const char *ids[3][2] = {
+        {"calaccX0", "calaccX1"},
+        {"calaccY0", "calaccY1"},
+        {"calaccZ0", "calaccZ1"}};
+    static const char *names[3] = {"X", "Y", "Z"};
+    static const char *dirs[2] = {"вниз", "вверх"};
+
+    printf("\r\n=== Автокалибровка акселерометра ===\r\n");
+    printf("Установите плату в 6 положений по подсказкам (плата неподвижна).\r\n");
+
+    result.measure.d_mag_sensor_error = false; // сброс возможной прошлой ошибки датчика
+
+    int raw[3];
+    for (int axis = 0; axis < 3; axis++)
+    {
+        for (int sign = 0; sign < 2; sign++)
+        {
+            printf("\r\nОсь %s направлена %s (ожидаем %s1g). Нажмите Enter...\r\n",
+                   names[axis], dirs[sign], sign ? "+" : "-");
+
+            int c;
+            do
+            {
+                c = fgetc(stdin);
+                if (c < 0)
+                    vTaskDelay(50 / portTICK_PERIOD_MS);
+            } while (c != '\n');
+
+            printf("Измерение...\r\n");
+            vTaskDelay(500 / portTICK_PERIOD_MS); // даём датчику успокоиться
+
+            if (!acc_cal_read(raw))
+            {
+                printf("Ошибка чтения акселерометра. Калибровка прервана.\r\n");
+                return;
+            }
+
+            set_menu_val_by_id(ids[axis][sign], raw[axis]);
+            printf("Ось %s (%s1g): %d мг -> сохранено в %s\r\n", names[axis], sign ? "+" : "-", raw[axis], ids[axis][sign]);
+        }
+    }
+
+    printf("\r\nКалибровка завершена:\r\n");
+    printf("  X: -1g=%d, +1g=%d\r\n", get_menu_val_by_id("calaccX0"), get_menu_val_by_id("calaccX1"));
+    printf("  Y: -1g=%d, +1g=%d\r\n", get_menu_val_by_id("calaccY0"), get_menu_val_by_id("calaccY1"));
+    printf("  Z: -1g=%d, +1g=%d\r\n", get_menu_val_by_id("calaccZ0"), get_menu_val_by_id("calaccZ1"));
+}
+
 void console_task(void *arg)
 {
     uint8_t serialbuffer[256];
@@ -293,7 +384,7 @@ void console_task(void *arg)
             }
             else
             {
-                if (pos < sizeof(serialbuffer))
+                if (pos < sizeof(serialbuffer) - 1) // оставляем место под завершающий '\0'
                     data[pos++] = c;
             }
         }
@@ -378,6 +469,9 @@ void console_task(void *arg)
                     ESP_LOGI("menu", "62. Непрерывный опрос Light");
                     ESP_LOGI("menu", "63. Включить подогреватель датчика температуры/влажности");
                     ESP_LOGI("menu", "64. Выключить подогреватель датчика температуры/влажности");
+                    ESP_LOGI("menu", "65. Опросить Wireless Power Receiver");
+                    ESP_LOGI("menu", "66. Настроить Wireless Power Receiver");
+                    ESP_LOGI("menu", "67. Автокалибровка акселерометра");
                     ESP_LOGI("menu", "-------------------------------------------");
                     break;
                 case 4: // IP сервера
@@ -488,6 +582,15 @@ void console_task(void *arg)
                 case 64: // датчик температуры/влажности
                     xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH_HEATER_OFF, eSetValueWithOverwrite);
                     break;
+                case 65: // Wireless Power Receiver
+                    xTaskNotify(xTaskI2C, NOTYFY_WPC_CHECK, eSetBits);
+                    break;
+                case 66: // Wireless Power Receiver
+                    xTaskNotify(xTaskI2C, NOTYFY_WPC_SETUP, eSetBits);
+                    break;
+                case 67: // Автокалибровка акселерометра
+                    acc_calibration();
+                    break;
                 default:
                     if (n > 0 && n <= sizeof(menu) / sizeof(menu_t))
                     {
@@ -499,13 +602,12 @@ void console_task(void *arg)
                 }
                 break;
             case 4: // IP сервера
-                if (sscanf((const char *)serialbuffer, "%hhu.%hhu.%hhu.%hhu", &mac_addr[0], &mac_addr[1], &mac_addr[2], &mac_addr[3]) == 4)
+                ip_addr.addr = esp_ip4addr_aton((const char *)serialbuffer);
+                if (ip_addr.addr != INADDR_NONE)
                 {
                     esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
                     if (err == ESP_OK)
                     {
-                        esp_ip4_addr_t ip_addr;
-                        ip_addr.addr = (mac_addr[0] << 0) | (mac_addr[1] << 8) | (mac_addr[2] << 16) | (mac_addr[3] << 24);
                         ESP_LOGD("NVS", "Write  \"%s\" : \"" IPSTR "\"", menu[3].id, IP2STR(&ip_addr));
                         menu[3].val = (int)ip_addr.addr;
                         nvs_set_i32(my_handle, menu[3].id, menu[3].val);

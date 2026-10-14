@@ -104,7 +104,7 @@ void modem_task(void *arg)
                 break;
             }
 
-            ee = wait_string(data, "\"EXIT PSM\"", 1000 / portTICK_PERIOD_MS);
+            ee = wait_string(data, "\"EXIT PSM\"", 1000 / portTICK_PERIOD_MS, RX_BUF_SIZE);
 
             ESP_LOGD(TAG, "Wait... %s", data);
 
@@ -148,7 +148,7 @@ void modem_task(void *arg)
                     nbiot_power_pin(1000 / portTICK_PERIOD_MS, MODEM_POWER);
                 }
                 gpio_set_level(MODEM_POWER, 0);
-                vTaskDelay(1 / portTICK_PERIOD_MS);
+                vTaskDelay(1);
                 ee = at_reply_wait_OK("AT\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
             } while (ee != ESP_OK && d_nbiot_error_counter < 5);
 
@@ -385,30 +385,34 @@ void modem_task(void *arg)
             {
                 //+CCLK: 24/04/30,07:49:36+12
                 //+CCLK: "2026/03/09,08:41:39+12" - SIM7028
-                int dt[6] = {0, 0, 0, 0, 0, 0};
                 char *pdata = strstr((const char *)data, "CCLK: ");
-                char *ss = pdata + 6;
-
-                if (chip == 7028)
+                if (pdata) // ответ может не содержать время — тогда не разбираем
                 {
-                    ss++;
-                }
+                    int dt[6] = {0, 0, 0, 0, 0, 0};
+                    char *ss = pdata + 6;
 
-                int parsed = sscanf((const char *)ss, "%d/%d/%d,%d:%d:%d", &dt[0], &dt[1], &dt[2], &dt[3], &dt[4], &dt[5]);
-                if (parsed == 6)
-                {
-                    struct tm tm;
-                    tm.tm_year = (dt[0] > 1900) ? dt[0] - 1900 : dt[0] + 100;
-                    tm.tm_mon = dt[1] - 1;
-                    tm.tm_mday = dt[2];
-                    tm.tm_hour = dt[3];
-                    tm.tm_min = dt[4];
-                    tm.tm_sec = dt[5];
+                    if (chip == 7028)
+                    {
+                        ss++;
+                    }
 
-                    time_t t = mktime(&tm) + timezone * 3600; // UNIX time + timezone offset
-                    struct timeval now = {.tv_sec = t};
-                    settimeofday(&now, NULL);
-                    ESP_LOGI(TAG, "Set date and time: %s", get_datetime(time(0)));
+                    int parsed = sscanf((const char *)ss, "%d/%d/%d,%d:%d:%d", &dt[0], &dt[1], &dt[2], &dt[3], &dt[4], &dt[5]);
+                    if (parsed == 6)
+                    {
+                        struct tm tm = {0};
+                        tm.tm_isdst = -1; // пусть mktime сам определит летнее время; остальные поля заполняются ниже
+                        tm.tm_year = (dt[0] > 1900) ? dt[0] - 1900 : dt[0] + 100;
+                        tm.tm_mon = dt[1] - 1;
+                        tm.tm_mday = dt[2];
+                        tm.tm_hour = dt[3];
+                        tm.tm_min = dt[4];
+                        tm.tm_sec = dt[5];
+
+                        time_t t = mktime(&tm) + timezone * 3600; // UNIX time + timezone offset
+                        struct timeval now = {.tv_sec = t};
+                        settimeofday(&now, NULL);
+                        ESP_LOGI(TAG, "Set date and time: %s", get_datetime(time(0)));
+                    }
                 }
             }
 
@@ -437,9 +441,9 @@ void modem_task(void *arg)
                 char *s = strstr((const char *)data, "+CGDCONT: ");
                 if (s)
                 {
-                    for (int i = 0; i < 3; i++)
+                    for (int i = 0; i < 3 && s; i++)
                     {
-                        s = strstr((const char *)++s, ",");
+                        s = strstr(s + 1, ",");
                     }
                 }
 
@@ -546,7 +550,7 @@ void modem_task(void *arg)
                         const char *s1 = strstr((const char *)data, "+CIPOPEN: ");
                         if (s1 == NULL)
                         {
-                            ee = wait_string(data, "+CIPOPEN: ", 90000 / portTICK_PERIOD_MS);
+                            ee = wait_string(data, "+CIPOPEN: ", 90000 / portTICK_PERIOD_MS, RX_BUF_SIZE);
                         };
                     }
 
@@ -572,17 +576,21 @@ void modem_task(void *arg)
                             snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%i,%i\r\n", socket, l);
                         }
 
-                        ee = at_reply_wait(send_cmd, ">", (char *)data, 1000 / portTICK_PERIOD_MS);
+                        ee = at_reply_wait(send_cmd, ">", (char *)data, 1000 / portTICK_PERIOD_MS, RX_BUF_SIZE);
                     }
 
                     esp_err_t send_ee = ESP_FAIL;
                     if (ee == ESP_OK)
-                        send_ee = at_reply_wait(send_data, "+CIPSEND: ", (char *)data, 60000 / portTICK_PERIOD_MS);
+                    {
+                        send_ee = at_reply_wait(send_data, "+CIPSEND: ", (char *)data, 60000 / portTICK_PERIOD_MS, RX_BUF_SIZE);
+                        if (send_ee == ESP_OK)
+                            strcpy(net_status_current, "Отправлено.");
+                    }
 
                     // vTaskDelay(5000 / portTICK_PERIOD_MS);
 
                     // wait 10s for reply from server
-                    while (wait_string(data, "\r\n", 10000 / portTICK_PERIOD_MS) == ESP_OK)
+                    while (wait_string(data, "\r\n", 10000 / portTICK_PERIOD_MS, RX_BUF_SIZE) == ESP_OK)
                     {
                         ESP_LOGI(TAG, "Modem: %s", data);
                         ee = check_received_message(data, send_data, chip);
@@ -669,7 +677,7 @@ void modem_task(void *arg)
                 };
 
                 // wait 10s for reply from server
-                while (wait_string(data, "\r\n", 10000 / portTICK_PERIOD_MS) == ESP_OK)
+                while (wait_string(data, "\r\n", 10000 / portTICK_PERIOD_MS, RX_BUF_SIZE) == ESP_OK)
                 {
                     ESP_LOGD(TAG, "Modem: %s", data);
                     ee = check_received_message(data, send_data, chip);
@@ -687,6 +695,7 @@ void modem_task(void *arg)
             // если запускаем терминал - стоп работа с модулем
             if (xEventGroupGetBits(status_event_group) & NB_TERMINAL)
             {
+                gpio_set_level(MODEM_POWER, 0);
                 // Disable the use of PSM and discard all parameters for PSM or, if available reset to the manufacturer specific default values.
                 print_atcmd("AT+CPSMS=2\r\n", data);
                 cpsms0 = true;

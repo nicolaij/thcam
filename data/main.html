@@ -1,451 +1,542 @@
 ﻿<!DOCTYPE html>
 <html>
-  <head>
-    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>Настройки</title>
 
-    <style>
-      .sc-gauge {
-        width: 200px;
-        height: 200px;
-        margin: 10px;
-      }
-      .sc-background {
-        position: relative;
-        height: 100px;
-        margin-bottom: 5px;
-        background-color: LightGray;
-        border-radius: 150px 150px 0 0;
-        overflow: hidden;
-        text-align: center;
-      }
-      .sc-mask {
-        position: absolute;
-        top: 25px;
-        right: 25px;
-        left: 25px;
-        height: 75px;
-        background-color: White;
-        border-radius: 150px 150px 0 0;
-      }
-      .sc-percentage {
-        position: absolute;
-        top: -5%;
-        left: 47.5%;
-        width: 5%;
-        height: 100%;
-        background-color: Red;
-        transform: rotate(0deg);
-        transition: 1s;
-        transform-origin: bottom center;
-      }
-      .sc-min {
-        float: left;
-      }
-      .sc-max {
-        float: right;
-      }
-      .sc-value {
-        position: absolute;
-        top: 50%;
-        left: 0;
-        width: 100%;
-        font-size: 48px;
-        font-weight: 700;
-      }
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+  <meta name="viewport" content="width=device-width" />
+  <title>Настройки</title>
 
-      .cubecontainer {
-        width: 200px;
-        height: 200px;
-        perspective: 600px;
-        margin: 100px 100px 0;
-        perspective-origin: center -100px;
-      }
-      .cube {
-        transform-style: preserve-3d;
-        width: 100%;
-        height: 100%;
-        position: relative;
-        transition: 300ms linear all;
-      }
-      .face {
-        position: absolute;
-      }
-      .top {
-        transform: rotateX(90deg) translateZ(60px);
-        background-color: rgb(35, 115, 161);
-        width: 100%;
-        height: 60%;
-      }
-      .sensor {
-        transform: rotateX(90deg) translateZ(10px);
-        border-radius: 33%;
-        background: #ff0000;
-        width: 20px;
-        height: 20px;
-        z-index: 1;
-      }
-      .bottom {
-        transform: rotateX(-90deg) translateZ(20px);
-        background-color: rgb(40, 90, 80);
-        width: 100%;
-        height: 60%;
-      }
-      .right {
-        transform: rotateY(90deg) translateZ(140px);
-        background-color: rgb(60, 90, 80);
-        width: 60%;
-        height: 40%;
-      }
-      .left {
-        transform: rotateY(-90deg) translateZ(60px);
-        background-color: rgb(80, 90, 80);
-        width: 60%;
-        height: 40%;
-      }
-      .front {
-        transform: rotateX(0deg) translateZ(60px);
-        background-color: rgb(100, 90, 80);
-        width: 100%;
-        height: 40%;
-      }
-      .back {
-        transform: rotateX(-180deg) translateZ(60px);
-        background-color: rgb(20, 90, 80);
-        width: 100%;
-        height: 40%;
-      }
-    </style>
-  </head>
-  <body>
-    <form name="settings" action="" method="post" onsubmit="validate()">
-      <div id="settingscontent"></div>
-      <input type="submit" value="Submit" />
-    </form>
-    <br />
-    <div>
-      <table style="width: 300px">
-        <tr>
-          <th>
-            <input type="checkbox" id="accmag" name="accmag" onchange="toggleCheckbox(this)" />
-            <label for="accmag">Read </label>
-          </th>
-          <th>X</th>
-          <th>Y</th>
-          <th>Z</th>
-          <th>∑</th>
-        </tr>
-        <tr>
-          <th style="width: 30%">ACC(g):</th>
-          <td>
-            <div id="accx" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">-2</span>
-              <span class="sc-max">2</span>
+  <style>
+    .sc-gauge {
+      width: 200px;
+      height: 200px;
+      margin: 10px;
+    }
+
+    .sc-background {
+      position: relative;
+      height: 100px;
+      margin-bottom: 5px;
+      background-color: LightGray;
+      border-radius: 150px 150px 0 0;
+      overflow: hidden;
+      text-align: center;
+    }
+
+    .sc-mask {
+      position: absolute;
+      top: 25px;
+      right: 25px;
+      left: 25px;
+      height: 75px;
+      background-color: White;
+      border-radius: 150px 150px 0 0;
+    }
+
+    .sc-percentage {
+      position: absolute;
+      top: -5%;
+      left: 47.5%;
+      width: 5%;
+      height: 100%;
+      background-color: Red;
+      transform: rotate(0deg);
+      transition: 1s;
+      transform-origin: bottom center;
+    }
+
+    .sc-min {
+      float: left;
+    }
+
+    .sc-max {
+      float: right;
+    }
+
+    .sc-value {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      width: 100%;
+      font-size: 48px;
+      font-weight: 700;
+    }
+
+    .cubecontainer {
+      width: 200px;
+      height: 200px;
+      perspective: 600px;
+      margin: 100px 100px 0;
+      perspective-origin: center -100px;
+    }
+
+    .cube {
+      transform-style: preserve-3d;
+      width: 100%;
+      height: 100%;
+      position: relative;
+      transition: 300ms linear all;
+    }
+
+    .face {
+      position: absolute;
+    }
+
+    .top {
+      transform: rotateX(90deg) translateZ(60px);
+      background-color: rgb(35, 115, 161);
+      width: 100%;
+      height: 60%;
+    }
+
+    .sensor {
+      transform: rotateX(90deg) translateZ(10px);
+      border-radius: 33%;
+      background: #ff0000;
+      width: 20px;
+      height: 20px;
+      z-index: 1;
+    }
+
+    .bottom {
+      transform: rotateX(-90deg) translateZ(20px);
+      background-color: rgb(40, 90, 80);
+      width: 100%;
+      height: 60%;
+    }
+
+    .right {
+      transform: rotateY(90deg) translateZ(140px);
+      background-color: rgb(60, 90, 80);
+      width: 60%;
+      height: 40%;
+    }
+
+    .left {
+      transform: rotateY(-90deg) translateZ(60px);
+      background-color: rgb(80, 90, 80);
+      width: 60%;
+      height: 40%;
+    }
+
+    .front {
+      transform: rotateX(0deg) translateZ(60px);
+      background-color: rgb(100, 90, 80);
+      width: 100%;
+      height: 40%;
+    }
+
+    .back {
+      transform: rotateX(-180deg) translateZ(60px);
+      background-color: rgb(20, 90, 80);
+      width: 100%;
+      height: 40%;
+    }
+  </style>
+</head>
+
+<body>
+  <form name="settings" action="" method="post" onsubmit="validate()">
+    <div id="settingscontent"></div>
+    <input type="submit" value="Submit" />
+  </form>
+  <br />
+  <div>
+    <table style="width: 300px">
+      <tr>
+        <th>
+          <input type="checkbox" id="accmag" name="accmag" onchange="toggleCheckbox(this)" />
+          <label for="accmag">Read </label>
+        </th>
+        <th>X</th>
+        <th>Y</th>
+        <th>Z</th>
+        <th>∑</th>
+      </tr>
+      <tr>
+        <th style="width: 30%">ACC(g):</th>
+        <td>
+          <div id="accx" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-          <td>
-            <div id="accy" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">-2</span>
-              <span class="sc-max">2</span>
+            <span class="sc-min">-2</span>
+            <span class="sc-max">2</span>
+          </div>
+        </td>
+        <td>
+          <div id="accy" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-          <td>
-            <div id="accz" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">-2</span>
-              <span class="sc-max">2</span>
+            <span class="sc-min">-2</span>
+            <span class="sc-max">2</span>
+          </div>
+        </td>
+        <td>
+          <div id="accz" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-          <td>
-            <div id="accv" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">0</span>
-              <span class="sc-max">4</span>
+            <span class="sc-min">-2</span>
+            <span class="sc-max">2</span>
+          </div>
+        </td>
+        <td>
+          <div id="accv" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-        </tr>
-        <tr>
-          <th style="width: 30%">MAG(Gs):</th>
-          <td>
-            <div id="magx" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">-2</span>
-              <span class="sc-max">2</span>
+            <span class="sc-min">0</span>
+            <span class="sc-max">4</span>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <th style="width: 30%">MAG(Gs):</th>
+        <td>
+          <div id="magx" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-          <td>
-            <div id="magy" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">-2</span>
-              <span class="sc-max">2</span>
+            <span class="sc-min">-2</span>
+            <span class="sc-max">2</span>
+          </div>
+        </td>
+        <td>
+          <div id="magy" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-          <td>
-            <div id="magz" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">-2</span>
-              <span class="sc-max">2</span>
+            <span class="sc-min">-2</span>
+            <span class="sc-max">2</span>
+          </div>
+        </td>
+        <td>
+          <div id="magz" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-          <td>
-            <div id="magv" class="sc-gauge">
-              <div class="sc-background">
-                <div class="sc-percentage"></div>
-                <div class="sc-mask"></div>
-                <span class="sc-value">0.00</span>
-              </div>
-              <span class="sc-min">0</span>
-              <span class="sc-max">4</span>
+            <span class="sc-min">-2</span>
+            <span class="sc-max">2</span>
+          </div>
+        </td>
+        <td>
+          <div id="magv" class="sc-gauge">
+            <div class="sc-background">
+              <div class="sc-percentage"></div>
+              <div class="sc-mask"></div>
+              <span class="sc-value">0.00</span>
             </div>
-          </td>
-        </tr>
-      </table>
+            <span class="sc-min">0</span>
+            <span class="sc-max">4</span>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="cubecontainer" style="float: left">
+    <div id="cube" class="cube">
+      <div class="face front"></div>
+      <div class="face sensor"></div>
+      <div class="face back"></div>
+      <div class="face right"></div>
+      <div class="face left"></div>
+      <div class="face top"></div>
+      <div class="face bottom"></div>
     </div>
-
-    <div class="cubecontainer" style="float: left">
-      <div id="cube" class="cube">
-        <div class="face front"></div>
-        <div class="face sensor"></div>
-        <div class="face back"></div>
-        <div class="face right"></div>
-        <div class="face left"></div>
-        <div class="face top"></div>
-        <div class="face bottom"></div>
-      </div>
-    </div>
-    <div style="height: 300px; display: inline-block">
+  </div>
+  <div style="height: 300px; display: inline-block">
+    <fieldset>
+      <legend>Дискретный сигнал</legend>
       <fieldset>
-        <legend>Дискретный сигнал</legend>
-        <fieldset>
-          <legend>Использовать</legend>
-          <input id="usemag" type="radio" name="use" value="mag" />
-          <label for="usemag">Магнитометр</label>
-          <input id="useacc" type="radio" name="use" value="acc" />
-          <label for="useacc">Акселерометр</label>
-        </fieldset>
-
-        <fieldset>
-          <legend>Текущие параметры</legend>
-          <input type="checkbox" id="open" name="open" value="open" onchange="storeCheckbox(this)" />
-          <label for="open">Открыто</label>
-          <div id="openflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block"></div>
-          <br />
-          <input type="checkbox" id="close" name="close" value="close" onchange="storeCheckbox(this)" />
-          <label for="close">Закрыто</label>
-          <div id="closeflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block"></div>
-          <br />
-        </fieldset>
+        <legend>Использовать</legend>
+        <input id="usemag" type="radio" name="use" value="mag" />
+        <label for="usemag">Магнитометр</label>
+        <input id="useacc" type="radio" name="use" value="acc" />
+        <label for="useacc">Акселерометр</label>
       </fieldset>
-    </div>
 
-    <p><a href="/d3">Буфер данных</a></p>
+      <fieldset>
+        <legend>Текущие параметры</legend>
+        <input type="checkbox" id="open" name="open" value="open" onchange="storeCheckbox(this)" />
+        <label for="open">Открыто</label>
+        <div id="openflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block"></div>
+        <br />
+        <input type="checkbox" id="close" name="close" value="close" onchange="storeCheckbox(this)" />
+        <label for="close">Закрыто</label>
+        <div id="closeflag" style="padding-left: 20px; height: 20px; width: 50px; display: inline-block"></div>
+        <br />
+      </fieldset>
+    </fieldset>
+  </div>
 
-    <div id="filecontent"></div>
+  <p><button onclick="measure(1)">Измерить</button>&nbsp;<a href="/d3">Буфер данных</a></p>
 
-    <script>
-      var mag = ["0", "0", "0"];
-      var acc = ["0", "0", "0"];
-      var use = "";
+  <fieldset style="width: 520px">
+    <legend>Калибровка акселерометра</legend>
+    <button type="button" id="calibbtn" onclick="calibAction()">Начать калибровку</button>
+    <div id="calibstate" style="margin-top: 6px"></div>
+    <div id="caliblog" style="font-family: monospace; white-space: pre-line"></div>
+  </fieldset>
+  <br />
 
-      var socket = new WebSocket("ws://" + location.host + "/ws");
+  <div id="filecontent"></div>
 
-      socket.onopen = function () {
-        socket.send("openws:" + String(Date.now() / 1000));
-      };
+  <script>
+    var mag = ["0", "0", "0"];
+    var acc = ["0", "0", "0"];
+    var use = "";
 
-      socket.onmessage = function (e) {
-        //console.log(e);
-        res = e.data.split(",");
-        acc = [res[0], res[1], res[2]]; //res[0].split(" ");
-        mag = [res[3], res[4], res[5]]; //mag = res[1].split(" ");
-        flags = Number(res[6]);
+    var socket = new WebSocket("ws://" + location.host + "/ws");
 
-        gauge_value(Number(acc[0]), "accx");
-        gauge_value(Number(acc[1]), "accy");
-        gauge_value(Number(acc[2]), "accz");
-        gauge_value(Math.sqrt(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]), "accv");
+    socket.onopen = function () {
+      socket.send("openws:" + String(Date.now() / 1000));
+    };
 
-        calculateAngles(Number(acc[0]), Number(acc[1]), Number(acc[2]));
+    socket.onmessage = function (e) {
+      //console.log(e);
+      // Ответ на фиксацию положения при калибровке: calres:<n>:<мг>
+      if (e.data.substring(0, 7) === "calres:") {
+        var p = e.data.split(":");
+        var idx = Number(p[1]);
+        var val = Number(p[2]);
+        if (idx >= 0 && idx < 6) {
+          calValues[idx] = val;
+          document.getElementById("caliblog").innerHTML +=
+            CAL_STEPS[idx].id + " = " + val + " мг (" + (val / 1000).toFixed(2) + " g)\n";
+          calIndex = idx + 1;
+          calibShowStep();
+        }
+        return;
+      }
 
-        gauge_value(Number(mag[0]), "magx");
-        gauge_value(Number(mag[1]), "magy");
-        gauge_value(Number(mag[2]), "magz");
-        gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
+      res = e.data.split(",");
+      acc = [res[0], res[1], res[2]]; //res[0].split(" ");
+      mag = [res[3], res[4], res[5]]; //mag = res[1].split(" ");
+      flags = Number(res[6]);
 
-        if (flags & (1 << 12)) document.getElementById("openflag").style.backgroundColor = "red";
-        else document.getElementById("openflag").style.backgroundColor = "transparent";
+      gauge_value(Number(acc[0]), "accx");
+      gauge_value(Number(acc[1]), "accy");
+      gauge_value(Number(acc[2]), "accz");
+      gauge_value(Math.sqrt(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]), "accv");
 
-        if (flags & (1 << 13)) document.getElementById("closeflag").style.backgroundColor = "red";
-        else document.getElementById("closeflag").style.backgroundColor = "transparent";
-      };
+      calculateAngles(Number(acc[0]), Number(acc[1]), Number(acc[2]));
 
-      document.addEventListener("DOMContentLoaded", function () {
-        fetch("/menu")
-          .then((response) => {
-            return response.text();
-          })
-          .then((data) => {
-            document.getElementById("settingscontent").innerHTML = data;
-            if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
-            if (document.getElementById("enableclosemagX").innerHTML) use = "mag";
-            if (document.getElementById("enableopenaccX").innerHTML) use = "acc";
-            if (document.getElementById("enablecloseaccX").innerHTML) use = "acc";
+      gauge_value(Number(mag[0]), "magx");
+      gauge_value(Number(mag[1]), "magy");
+      gauge_value(Number(mag[2]), "magz");
+      gauge_value(Math.sqrt(mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2]), "magv");
 
-            if (use == "mag") document.getElementById("usemag").checked = true;
-            if (use == "acc") document.getElementById("useacc").checked = true;
-          });
+      if (flags & (1 << 12)) document.getElementById("openflag").style.backgroundColor = "red";
+      else document.getElementById("openflag").style.backgroundColor = "transparent";
 
-        fetch("/history")
-          .then((response) => {
-            return response.text();
-          })
-          .then((data) => {
-            data = "<table><tr><td>" + data.replace(/,/g, "</td><td>");
-            data = data.replace(/(?:\r\n|\r|\n)/g, "</td></tr><tr><td>") + "</td></tr></table>";
-            document.getElementById("filecontent").innerHTML = data;
-          });
-      });
-      
-      function gauge_value(x, val) {
-        const parentDOM = document.getElementById(val);
-        parentDOM.getElementsByClassName("sc-value")[0].innerHTML = x.toFixed(2);
-        if (val == "accv" || val == "magv") {
-          if (x > 4) {
-            x = 4;
-          }
-          if (x < 0) {
-            x = 0;
-          }
-          parentDOM.getElementsByClassName("sc-percentage")[0].style.transform =
-            "rotate(" + ((x / 2) * 90 - 90) + "deg)";
-        } else if (((val == "magx" || val == "magy") && x == -6.1) || (val == "magz" && x == -6.8)) {
-          parentDOM.getElementsByClassName("sc-background")[0].style.backgroundColor = "Red"; //overload!!!
-        } else {
-          parentDOM.getElementsByClassName("sc-background")[0].style.backgroundColor = "LightGray";
-          if (x > 2) {
-            x = 2;
-          }
-          if (x < -2) {
-            x = -2;
-          }
+      if (flags & (1 << 13)) document.getElementById("closeflag").style.backgroundColor = "red";
+      else document.getElementById("closeflag").style.backgroundColor = "transparent";
+    };
 
-          parentDOM.getElementsByClassName("sc-percentage")[0].style.transform = "rotate(" + (x / 2) * 90 + "deg)";
+    function measure(chan) {
+      socket.send("start:" + String(chan));
+    }
+
+    // --- Калибровка акселерометра (6 положений) ---
+    var CAL_STEPS = [
+      { id: "calaccX0", text: "ось X направлена ВНИЗ (ожидаем -1g)" },
+      { id: "calaccX1", text: "ось X направлена ВВЕРХ (ожидаем +1g)" },
+      { id: "calaccY0", text: "ось Y направлена ВНИЗ (ожидаем -1g)" },
+      { id: "calaccY1", text: "ось Y направлена ВВЕРХ (ожидаем +1g)" },
+      { id: "calaccZ0", text: "ось Z направлена ВНИЗ (ожидаем -1g)" },
+      { id: "calaccZ1", text: "ось Z направлена ВВЕРХ (ожидаем +1g)" }
+    ];
+    var calIndex = -1; // -1: не начата, 0..5: текущий шаг, 6: завершена
+    var calValues = [];
+
+    function calibAction() {
+      if (calIndex < 0) {
+        // старт: включаем поток измерений (галочка Read)
+        if (!document.getElementById("accmag").checked) {
+          document.getElementById("accmag").checked = true;
+          socket.send("accmag:1");
+        }
+        calIndex = 0;
+        calValues = [];
+        document.getElementById("caliblog").innerHTML = "";
+      } else if (calIndex < 6) {
+        socket.send("cal:" + calIndex); // фиксируем текущее положение
+      } else {
+        calIndex = -1; // завершено, закрываем
+      }
+      calibShowStep();
+    }
+
+    function calibShowStep() {
+      var st = document.getElementById("calibstate");
+      var btn = document.getElementById("calibbtn");
+      if (calIndex < 0) {
+        st.innerHTML = "Нажмите «Начать калибровку». Плату нужно будет поочерёдно ставить в 6 положений. После калибровки заново запишите положения «Открыто/Закрыто».";
+        btn.innerText = "Начать калибровку";
+      } else if (calIndex < 6) {
+        st.innerHTML = "Шаг " + (calIndex + 1) + "/6: " + CAL_STEPS[calIndex].text + ". Поставьте плату и нажмите «Зафиксировать».";
+        btn.innerText = "Зафиксировать";
+      } else {
+        st.innerHTML = "Калибровка завершена. Теперь заново запишите положения «Открыто» и «Закрыто» (галочки ниже).";
+        btn.innerText = "Готово";
+      }
+    }
+    
+    document.addEventListener("DOMContentLoaded", function () {
+      fetch("/menu")
+        .then((response) => {
+          return response.text();
+        })
+        .then((data) => {
+          document.getElementById("settingscontent").innerHTML = data;
+          if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
+          if (document.getElementById("enableclosemagX").innerHTML) use = "mag";
+          if (document.getElementById("enableopenaccX").innerHTML) use = "acc";
+          if (document.getElementById("enablecloseaccX").innerHTML) use = "acc";
+
+          if (use == "mag") document.getElementById("usemag").checked = true;
+          if (use == "acc") document.getElementById("useacc").checked = true;
+
+          calibShowStep();
+        });
+
+      fetch("/history")
+        .then((response) => {
+          return response.text();
+        })
+        .then((data) => {
+          data = "<table><tr><td>" + data.replace(/,/g, "</td><td>");
+          data = data.replace(/(?:\r\n|\r|\n)/g, "</td></tr><tr><td>") + "</td></tr></table>";
+          document.getElementById("filecontent").innerHTML = data;
+        });
+    });
+
+    function gauge_value(x, val) {
+      const parentDOM = document.getElementById(val);
+      parentDOM.getElementsByClassName("sc-value")[0].innerHTML = x.toFixed(2);
+      if (val == "accv" || val == "magv") {
+        if (x > 4) {
+          x = 4;
+        }
+        if (x < 0) {
+          x = 0;
+        }
+        parentDOM.getElementsByClassName("sc-percentage")[0].style.transform =
+          "rotate(" + ((x / 2) * 90 - 90) + "deg)";
+      } else if (((val == "magx" || val == "magy") && x == -6.1) || (val == "magz" && x == -6.8)) {
+        parentDOM.getElementsByClassName("sc-background")[0].style.backgroundColor = "Red"; //overload!!!
+      } else {
+        parentDOM.getElementsByClassName("sc-background")[0].style.backgroundColor = "LightGray";
+        if (x > 2) {
+          x = 2;
+        }
+        if (x < -2) {
+          x = -2;
         }
 
-        return 0;
+        parentDOM.getElementsByClassName("sc-percentage")[0].style.transform = "rotate(" + (x / 2) * 90 + "deg)";
       }
 
-      function calculateAngles(x, y, z) {
-        // Нормализуем значения (на случай, если они немного выходят за пределы -1..1)
-        const nx = Math.min(Math.max(x, -1), 1);
-        const ny = Math.min(Math.max(y, -1), 1);
-        const nz = Math.min(Math.max(z, -1), 1);
+      return 0;
+    }
 
-        // Вычисляем углы вращения
-        let rotateX = 0,
-          rotateY = 0,
-          rotateZ = 0;
+    function calculateAngles(x, y, z) {
+      // Опорная поза: z = -1 g (куб как нарисован, когда лежит плашмя).
+      // Нормализуем вектор показаний: atan2 не зависит от длины вектора, но так
+      // значения остаются в разумных пределах при перегрузках (клиппинг по осям не нужен).
+      const len = Math.sqrt(x * x + y * y + z * z) || 1;
+      const nx = x / len,
+        ny = y / len,
+        nz = z / len;
 
-        rotateX = Math.atan2(ny, Math.sqrt(nx * nx + nz * nz)) * (-180 / Math.PI);
-        //rotateY = Math.atan2(Math.sqrt(nx * nx + ny * ny), nz) * (180 / Math.PI);
-        rotateZ = Math.atan2(nx, Math.sqrt(ny * ny + nz * nz)) * (180 / Math.PI);
+      // Поворот M = Ry * Rx, совмещающий вектор показаний с опорным (0, 0, -1):
+      //   rotateX - наклон вперёд/назад, rotateY - наклон влево/вправо
+      const rotateX = Math.atan2(ny, -nz) * (180 / Math.PI);
+      const rotateY = Math.atan2(-nx, Math.sqrt(ny * ny + nz * nz)) * (180 / Math.PI);
 
-        // Применяем преобразования к элементу
-        document.getElementById("cube").style.transform =
-          "rotateX(" + rotateX + "deg) rotateY(" + rotateY + "deg) rotateZ(" + rotateZ + "deg)";
+      // Применяем преобразования к элементу (порядок важен: сначала rotateY, затем rotateX)
+      document.getElementById("cube").style.transform =
+        "rotateY(" + rotateY + "deg) rotateX(" + rotateX + "deg)";
 
-        return { rotateX, rotateY, rotateZ };
-      }
+      return { rotateX, rotateY, rotateZ: 0 };
+    }
 
-      function toggleCheckbox(element) {
-        socket.send(element.name + ":" + String(Number(element.checked)));
-      }
+    function toggleCheckbox(element) {
+      socket.send(element.name + ":" + String(Number(element.checked)));
+    }
 
-      function storeCheckbox(element) {
-        if (document.getElementById("usemag").checked == true) use = "mag";
-        if (document.getElementById("useacc").checked == true) use = "acc";
+    function storeCheckbox(element) {
+      if (document.getElementById("usemag").checked == true) use = "mag";
+      if (document.getElementById("useacc").checked == true) use = "acc";
 
-        if (element.checked == true) {
-          document.getElementById("enable" + element.name + use + "X").innerHTML = "Вкл";
+      if (element.checked == true) {
+        document.getElementById("enable" + element.name + use + "X").innerHTML = "Вкл";
 
-          if (use == "acc") {
-            document.getElementById(element.name + "accX").value =
-              Number(acc[0]) * 1000 + " " + Number(acc[1]) * 1000 + " " + Number(acc[2]) * 1000;
-          }
-
-          if (use == "mag") {
-            document.getElementById(element.name + "magX").value =
-              Number(mag[0]) * 1000 + " " + Number(mag[1]) * 1000 + " " + Number(mag[2]) * 1000;
-          }
-        } else {
-          document.getElementById("enable" + element.name + use + "X").innerHTML = "";
+        if (use == "acc") {
+          document.getElementById(element.name + "accX").value =
+            Number(acc[0]) * 1000 + " " + Number(acc[1]) * 1000 + " " + Number(acc[2]) * 1000;
         }
+
+        if (use == "mag") {
+          document.getElementById(element.name + "magX").value =
+            Number(mag[0]) * 1000 + " " + Number(mag[1]) * 1000 + " " + Number(mag[2]) * 1000;
+        }
+      } else {
+        document.getElementById("enable" + element.name + use + "X").innerHTML = "";
       }
+    }
 
-      function validate() {
-        if (document.getElementById("enableopenmagX").innerHTML) {
-          val = document.getElementById("openmagX").value.split(" ");
-          document.getElementById("openmagY").value = val[1];
-          document.getElementById("openmagZ").value = val[2];
+    function validate() {
+      if (document.getElementById("enableopenmagX").innerHTML) {
+        val = document.getElementById("openmagX").value.split(" ");
+        document.getElementById("openmagY").value = val[1];
+        document.getElementById("openmagZ").value = val[2];
 
-          document.getElementById("openmage").value = "1";
-        } else document.getElementById("openmage").value = "0";
+        document.getElementById("openmage").value = "1";
+      } else document.getElementById("openmage").value = "0";
 
-        if (document.getElementById("enableclosemagX").innerHTML) {
-          val = document.getElementById("closemagX").value.split(" ");
-          document.getElementById("closemagY").value = val[1];
-          document.getElementById("closemagZ").value = val[2];
+      if (document.getElementById("enableclosemagX").innerHTML) {
+        val = document.getElementById("closemagX").value.split(" ");
+        document.getElementById("closemagY").value = val[1];
+        document.getElementById("closemagZ").value = val[2];
 
-          document.getElementById("closemage").value = "1";
-        } else document.getElementById("closemage").value = "0";
+        document.getElementById("closemage").value = "1";
+      } else document.getElementById("closemage").value = "0";
 
-        if (document.getElementById("enableopenaccX").innerHTML) {
-          val = document.getElementById("openaccX").value.split(" ");
-          document.getElementById("openaccY").value = val[1];
-          document.getElementById("openaccZ").value = val[2];
+      if (document.getElementById("enableopenaccX").innerHTML) {
+        val = document.getElementById("openaccX").value.split(" ");
+        document.getElementById("openaccY").value = val[1];
+        document.getElementById("openaccZ").value = val[2];
 
-          document.getElementById("openacce").value = "1";
-        } else document.getElementById("openacce").value = "0";
+        document.getElementById("openacce").value = "1";
+      } else document.getElementById("openacce").value = "0";
 
-        if (document.getElementById("enablecloseaccX").innerHTML) {
-          val = document.getElementById("closeaccX").value.split(" ");
-          document.getElementById("closeaccY").value = val[1];
-          document.getElementById("closeaccZ").value = val[2];
+      if (document.getElementById("enablecloseaccX").innerHTML) {
+        val = document.getElementById("closeaccX").value.split(" ");
+        document.getElementById("closeaccY").value = val[1];
+        document.getElementById("closeaccZ").value = val[2];
 
-          document.getElementById("closeacce").value = "1";
-        } else document.getElementById("closeacce").value = "0";
-      }
-    </script>
-  </body>
+        document.getElementById("closeacce").value = "1";
+      } else document.getElementById("closeacce").value = "0";
+    }
+  </script>
+</body>
+
 </html>

@@ -14,14 +14,14 @@ unsigned int fromActiveTime(uint8_t val);
 unsigned int fromPeriodicTAU(uint8_t val);
 void nbiot_power_pin(const TickType_t xTicksToDelay, int pin);
 esp_err_t print_atcmd(const char *cmd, char *buffer);
-esp_err_t wait_string(char *buffer, const char *swait, TickType_t ticks_to_wait);
-esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickType_t ticks_to_wait);
+esp_err_t wait_string(char *buffer, const char *swait, TickType_t ticks_to_wait, size_t cap);
+esp_err_t at_reply_wait(const char *cmd, const char *wait, char *buffer, TickType_t ticks_to_wait, size_t cap);
 esp_err_t at_reply_wait_OK(const char *cmd, char *buffer, TickType_t ticks_to_wait);
 esp_err_t at_result_get(const char *wait, const char *buffer, int *resultdata, int resultcount);
 esp_err_t at_reply_get(const char *cmd, const char *wait, char *buffer, int *resultdata, int resultcount, TickType_t ticks_to_wait);
 esp_err_t at_csosend(const int socket, const char *data, const int len_data, char *buffer, const char *wait);
 esp_err_t apply_command(const char *cmd, size_t len);
-int decode_fromHEX(const char *data, int len, char *result_data);
+int decode_fromHEX(const char *data, int len, char *result_data, size_t cap);
 int encode_toHEX(const char *data, char *result_data);
 
 

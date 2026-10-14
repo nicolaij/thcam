@@ -9,18 +9,42 @@ RTC_DATA_ATTR uint8_t th_sensor;
 
 #include "driver/i2c_master.h"
 
-i2c_master_dev_handle_t th_handle;
+i2c_master_dev_handle_t th_handle = NULL;
 
-i2c_master_dev_handle_t lsm303A_handle;
-i2c_master_dev_handle_t lsm303M_handle;
+i2c_master_dev_handle_t lsm303A_handle = NULL;
+i2c_master_dev_handle_t lsm303M_handle = NULL;
 
-i2c_master_dev_handle_t exp_handle;
+i2c_master_dev_handle_t exp_handle = NULL;
+i2c_master_dev_handle_t wpc_handle = NULL;
 
 #include "driver/temperature_sensor.h"
 
 #define I2C_TIMEOUT_VALUE_MS 20
 
 #include "LSM303DLHC.h"
+
+// Сырые показания акселерометра (мг) последнего измерения: (ax>>4)*2
+int acc_raw_mg[3] = {0, 0, 0};
+// Сглаженные сырые показания (мг) - для фиксации в калибровке
+int acc_raw_avg[3] = {0, 0, 0};
+
+// Калибровка акселерометра по двум точкам: m0 (при -1g) -> -1000, m1 (при +1g) -> +1000
+static int acc_cal_axis(const char *id0, const char *id1, int raw_mg)
+{
+    int m0 = get_menu_val_by_id(id0);
+    int m1 = get_menu_val_by_id(id1);
+    if (m1 == m0)
+        return raw_mg; // некорректная калибровка - без изменений
+    return -1000 + (raw_mg - m0) * 2000 / (m1 - m0);
+}
+
+// Пересчёт сырых мг в калиброванные мг по всем осям
+static void acc_calibrate(const int raw[3], int cal[3])
+{
+    cal[0] = acc_cal_axis("calaccX0", "calaccX1", raw[0]);
+    cal[1] = acc_cal_axis("calaccY0", "calaccY1", raw[1]);
+    cal[2] = acc_cal_axis("calaccZ0", "calaccZ1", raw[2]);
+}
 
 bool check_range(int x, int y, int z, int setx, int sety, int setz, int devi)
 {
@@ -85,7 +109,6 @@ bool htu21_crc_check(uint16_t value, uint8_t crc)
 
 void i2c_task(void *arg)
 {
-
     // i2c
     i2c_master_bus_config_t i2c_mst_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
@@ -129,9 +152,17 @@ void i2c_task(void *arg)
         .scl_speed_hz = 400000,
     };
 
+    // WPC NU1680 5W Wireless Power Receiver
+    i2c_device_config_t dev_wpc_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = 0x60,
+        .scl_speed_hz = 400000,
+    };
+
     result.measure.d_mag_sensor_error = true;
     result.measure.d_thsensor_error = true;
     result.measure.d_exp_error = true;
+    bool wpc_error = true;
 
     int try = 4;
     do
@@ -153,7 +184,7 @@ void i2c_task(void *arg)
     {
         th_sensor = dev_th_cfg.device_address;
         result.measure.d_thsensor_error = false;
-        xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_TH, eSetBits);
+        // xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_TH, eSetBits);
     }
 
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_th_cfg, &th_handle));
@@ -171,7 +202,7 @@ void i2c_task(void *arg)
         else
         {
             ESP_LOGI("LSM303", "try 0x%02x: OK", dev_m_cfg.device_address);
-            xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_MAGACC, eSetBits);
+            // xTaskNotify(xTaskGetCurrentTaskHandle(), NOTYFY_SENSOR_MAGACC, eSetBits);
             result.measure.d_mag_sensor_error = false;
         };
     } while (err_rc != ESP_OK && try > 0);
@@ -198,11 +229,12 @@ void i2c_task(void *arg)
         };
     } while (err_rc != ESP_OK && try > 0);
 
+    // result.measure.d_mag_sensor_error = true;
+    // result.measure.d_thsensor_error = true;
+
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_exp_cfg, &exp_handle));
 
-    // start ADC measure
-    xTaskNotifyGive(xTaskDIO);
-    vTaskDelay(10 / portTICK_PERIOD_MS); //start ADC
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2cbus_handle, &dev_wpc_cfg, &wpc_handle));
 
     // scan
     /*         for (int i = 0; i < 127; i++)
@@ -219,15 +251,19 @@ void i2c_task(void *arg)
     uint8_t cmd[2];
     uint8_t buffer[16];
 
+    int exp_prepare = 0;
+
     while (1)
     {
         uint32_t ulNotifiedValue;
 
         /* Ожидание оповещения. */
-        xTaskNotifyWait(pdFALSE,                                                                                 /* Не очищать биты на входе. */
-                        ULONG_MAX & ~(NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT | NOTYFY_TEST), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
-                        &ulNotifiedValue,                                                                        /* Сохраняет значение оповещения. */
+        xTaskNotifyWait(pdFALSE,                                                                                                        /* Не очищать биты на входе. */
+                        ULONG_MAX & ~(NOTYFY_SENSOR_MAGACC_CONT | NOTYFY_SENSOR_MAGACC_SPEEDCONT | NOTYFY_TEST | NOTYFY_EXPANDER_ONLY), /* Очистка всех бит на выходе. кроме BIT_NOTYFY_SENSOR_MAGACC_CONT*/
+                        &ulNotifiedValue,                                                                                               /* Сохраняет значение оповещения. */
                         tm);
+
+        // ESP_LOGD("ulNotifiedValue", "0x%x", ulNotifiedValue);
 
         if (result.measure.d_exp_error == false)
         {
@@ -242,15 +278,18 @@ void i2c_task(void *arg)
                 //     ESP_LOGI("PI4IOE5V6408", "Device ID and Control: 0x%02x", buffer[0]);
                 // };
                 vTaskDelay(1);
+
                 cmd[0] = 0x00;
                 err_rc = i2c_master_transmit_receive(exp_handle, cmd, 1, buffer, 16, I2C_TIMEOUT_VALUE_MS);
                 if (err_rc == ESP_OK)
                 {
                     ESP_LOG_BUFFER_HEX("PI4IOE5V6408", buffer, 16);
                 };
+
+                exp_prepare = 0;
             }
 
-            if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P0_DOWN | NOTYFY_EXPANDER_P0_PULLUP | NOTYFY_EXPANDER_P1_PULLUP | NOTYFY_EXPANDER_P0_PULLDIS | NOTYFY_EXPANDER_P1_PULLDIS))
+            if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_PULLUP | NOTYFY_EXPANDER_P1_PULLUP | NOTYFY_EXPANDER_P0_PULLDIS | NOTYFY_EXPANDER_P1_PULLDIS | NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_DOWN | NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_DOWN))
             {
                 // ESP_LOGI("PI4IOE5V6408", "Set output");
                 //  Register 03h : I/O Direction
@@ -271,16 +310,20 @@ void i2c_task(void *arg)
                     cmd[1] |= BIT0;
                 if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP))
                     cmd[1] |= BIT1;
+                // // if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_DOWN))
+                // //     cmd[1] &= ~BIT0;
+                // // if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_DOWN))
+                // //     cmd[1] &= ~BIT1;
 
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(exp_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
-                // vTaskDelay(1);
+                //  // vTaskDelay(1);
 
                 // Register 07h : Output High-Impedance
                 cmd[0] = 0x07;
                 cmd[1] = 0xff;
-                if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_DOWN))
+                if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_DOWN | NOTYFY_EXPANDER_P0_PULLUP))
                     cmd[1] &= ~BIT0;
-                if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_DOWN))
+                if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P1_PULLUP))
                     cmd[1] &= ~BIT1;
 
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(exp_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
@@ -289,9 +332,9 @@ void i2c_task(void *arg)
                 // Register 0bh : Pull-Up/-Down Enable
                 cmd[0] = 0x0b;
                 cmd[1] = 0xff;
-                if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_PULLDIS))
+                if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_DOWN | NOTYFY_EXPANDER_P0_PULLDIS))
                     cmd[1] &= ~BIT0;
-                if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_PULLDIS))
+                if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P1_PULLDIS))
                     cmd[1] &= ~BIT1;
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(exp_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
 
@@ -311,13 +354,14 @@ void i2c_task(void *arg)
                 //     ESP_LOGI("PI4IOE5V6408", "Register 0x%02x: 0x%02x", cmd[0], buffer[0]);
                 // };
 
+                /*
                 vTaskDelay(1);
                 cmd[0] = 0x00;
                 err_rc = i2c_master_transmit_receive(exp_handle, cmd, 1, buffer, 16, I2C_TIMEOUT_VALUE_MS);
                 if (err_rc == ESP_OK)
                 {
                     ESP_LOG_BUFFER_HEX("PI4IOE5V6408", buffer, 16);
-                };
+                }; */
                 /*
                                 cmd[0] = 0x05;
                                 err_rc = i2c_master_transmit_receive(exp_handle, cmd, 1, buffer, 1, I2C_TIMEOUT_VALUE_MS);
@@ -352,6 +396,95 @@ void i2c_task(void *arg)
                                     ESP_LOGD("PI4IOE5V6408", "Register 0x%02x: 0x%02x", cmd[0], buffer[0]);
                                 };
                 */
+
+                exp_prepare = 1;
+            }
+        }
+
+        if (ulNotifiedValue & (NOTYFY_EXPANDER_ONLY))
+            continue;
+
+        if (ulNotifiedValue & (NOTYFY_WPC_SETUP))
+        {
+            if (wpc_error == false)
+            {
+                /*                 cmd[0] = 0x15;
+                                cmd[1] = 0x11; // SET MTP_VBAT_TRK_EN
+                                ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(wpc_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
+                                vTaskDelay(1);
+
+                                cmd[0] = 0x16; // MTP_VBAT_DELTA
+                                cmd[1] = 0b00; // 00: 500mV
+                                ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(wpc_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
+                                vTaskDelay(1);
+
+                                cmd[0] = 0x17; // MTP_VBAT_LOWLMT
+                                cmd[1] = 0b10; // 10: 4.1V
+                                ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(wpc_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
+                                vTaskDelay(1);
+                 */
+                cmd[0] = 0x1d;
+                // cmd[1] = 92; // Vout = MTP_VOUT_SET [7:0] * 39.06 mV
+                // cmd[1] = 113; // 4413
+                // cmd[1] = 108; // 4,2v
+                cmd[1] = 133; // 5,2v
+                // ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(wpc_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
+                vTaskDelay(1);
+                /*
+
+                cmd[0] = 0x1e;  // The limit of over current protection.
+                cmd[1] = 0b100; //  0b100: 0.365A
+                ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(wpc_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
+
+                vTaskDelay(1);
+*/
+            }
+        }
+
+        if (ulNotifiedValue & (NOTYFY_WPC_CHECK))
+        {
+            wpc_error = true;
+            try = 2;
+            if (wpc_error)
+            {
+                do
+                {
+                    try--;
+                    err_rc = i2c_master_probe(i2cbus_handle, dev_wpc_cfg.device_address, I2C_TIMEOUT_VALUE_MS);
+                    if (err_rc != ESP_OK)
+                    {
+                        ESP_LOGE("WPC", "try 0x%02x: %s", dev_wpc_cfg.device_address, esp_err_to_name(err_rc));
+                        vTaskDelay(10 / portTICK_PERIOD_MS);
+                    }
+                    else
+                    {
+                        ESP_LOGI("WPC", "try 0x%02x: OK", dev_wpc_cfg.device_address);
+                        wpc_error = false;
+                    };
+                } while (err_rc != ESP_OK && try > 0);
+            }
+
+            if (wpc_error == false)
+            {
+                cmd[0] = 0x00;
+                err_rc = i2c_master_transmit_receive(wpc_handle, cmd, 1, buffer, 16, I2C_TIMEOUT_VALUE_MS);
+                if (err_rc == ESP_OK)
+                {
+                    ESP_LOG_BUFFER_HEX("WPC 0-15", buffer, 16);
+                };
+                cmd[0] = 0x10;
+                err_rc = i2c_master_transmit_receive(wpc_handle, cmd, 1, buffer, 16, I2C_TIMEOUT_VALUE_MS);
+                if (err_rc == ESP_OK)
+                {
+                    ESP_LOG_BUFFER_HEX("WPC 16-31", buffer, 16);
+                };
+                cmd[0] = 0x30;
+                err_rc = i2c_master_transmit_receive(wpc_handle, cmd, 1, buffer, 16, I2C_TIMEOUT_VALUE_MS);
+                if (err_rc == ESP_OK)
+                {
+                    ESP_LOG_BUFFER_HEX("WPC 48-63", buffer, 16);
+                    ESP_LOGI("WPC", "Vbatt %.1f mV, Iout %.1f mA, Vrect %.1f mV", ((int)buffer[3] << 2 | (buffer[2] & 0b11)) * 9.766f, ((int)buffer[1] << 2 | (buffer[0] & 0b11)) * 1.953f, ((int)buffer[5] << 2 | (buffer[4] & 0b11)) * 9.766f);
+                };
             }
         }
 
@@ -488,13 +621,17 @@ void i2c_task(void *arg)
             int16_t ax, ay, az;
             LSM303DLHC_getAcceleration(&ax, &ay, &az);
 
+            int acc_raw[3] = {(ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2};
+            int acc_cal[3];
+            acc_calibrate(acc_raw, acc_cal);
+
             if (get_menu_val_by_id("openacce"))
             {
-                result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"), get_menu_val_by_id("deviation"));
+                result.measure.open = check_range(acc_cal[0], acc_cal[1], acc_cal[2], get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"), get_menu_val_by_id("deviation"));
             }
             if (get_menu_val_by_id("closeacce"))
             {
-                result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"), get_menu_val_by_id("deviation"));
+                result.measure.close = check_range(acc_cal[0], acc_cal[1], acc_cal[2], get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"), get_menu_val_by_id("deviation"));
             }
 
             ESP_LOGD("LSM303", "INT1 src=%02x; CLICK src=%02x; ACC=%4d;%4d;%4d", int1, click, (ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2);
@@ -563,9 +700,18 @@ void i2c_task(void *arg)
                 result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
                 result.measure.mag[0] = (float)mx / _lsm303Mag_Gauss_LSB_XY * SENSORS_GAUSS_TO_MICROTESLA;
                 */
-                result.measure.acc[0] = (float)((ax >> 4) * 2) / 1000.0; // + - 4g
-                result.measure.acc[1] = (float)((ay >> 4) * 2) / 1000.0; // + - 4g
-                result.measure.acc[2] = (float)((az >> 4) * 2) / 1000.0; // + - 4g
+                // сохраняем сырые значения (для калибровки) и считаем калиброванные
+                acc_raw_mg[0] = (ax >> 4) * 2;
+                acc_raw_mg[1] = (ay >> 4) * 2;
+                acc_raw_mg[2] = (az >> 4) * 2;
+                for (int i = 0; i < 3; i++) // сглаживание для калибровки
+                    acc_raw_avg[i] = (acc_raw_avg[i] * 3 + acc_raw_mg[i]) / 4;
+                int acc_cal[3];
+                acc_calibrate(acc_raw_mg, acc_cal);
+
+                result.measure.acc[0] = acc_cal[0] / 1000.0; // + - 4g, с калибровкой
+                result.measure.acc[1] = acc_cal[1] / 1000.0; // + - 4g, с калибровкой
+                result.measure.acc[2] = acc_cal[2] / 1000.0; // + - 4g, с калибровкой
 
                 result.measure.mag[0] = (float)(mx) / 670.0; //+ - 2.5 Gauss
                 result.measure.mag[1] = (float)(my) / 670.0; //+ - 2.5 Gauss
@@ -575,7 +721,7 @@ void i2c_task(void *arg)
 
                 if (get_menu_val_by_id("openacce"))
                 {
-                    result.measure.open = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"), get_menu_val_by_id("deviation"));
+                    result.measure.open = check_range(acc_cal[0], acc_cal[1], acc_cal[2], get_menu_val_by_id("openaccX"), get_menu_val_by_id("openaccY"), get_menu_val_by_id("openaccZ"), get_menu_val_by_id("deviation"));
                 }
                 if (get_menu_val_by_id("openmage"))
                 {
@@ -583,7 +729,7 @@ void i2c_task(void *arg)
                 }
                 if (get_menu_val_by_id("closeacce"))
                 {
-                    result.measure.close = check_range((ax >> 4) * 2, (ay >> 4) * 2, (az >> 4) * 2, get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"), get_menu_val_by_id("deviation"));
+                    result.measure.close = check_range(acc_cal[0], acc_cal[1], acc_cal[2], get_menu_val_by_id("closeaccX"), get_menu_val_by_id("closeaccY"), get_menu_val_by_id("closeaccZ"), get_menu_val_by_id("deviation"));
                 }
                 if (get_menu_val_by_id("closemage"))
                 {

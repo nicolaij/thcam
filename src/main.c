@@ -28,6 +28,10 @@ TaskHandle_t xHandleWifi = NULL;
 void app_main(void)
 {
 
+    // защита от мусора в RTC-памяти: history_pos вне диапазона -> сброс в начало
+    if (history_pos >= HISTORY_SIZE)
+        history_pos = 0;
+
     uint32_t causes = esp_sleep_get_wakeup_causes();
 
     ESP_LOGD("Wake up", "causes: 0x%x", causes);
@@ -44,6 +48,14 @@ void app_main(void)
         {
             int pin = __builtin_ffsll(wakeup_pin_mask) - 1;
             ESP_LOGI("Wake up", "GPIO %d", pin);
+
+            // причины пробуждения по пинам (d_* флаги)
+            result.measure.d_light = (wakeup_pin_mask & BIT64(PIN_LIGHT)) != 0;
+            result.measure.d_water = ((wakeup_pin_mask & BIT64(PIN_WATER1)) != 0) ||
+                                     ((wakeup_pin_mask & BIT64(PIN_WATER2)) != 0) ||
+                                     (((PIN_WATER3 != GPIO_NUM_NC) ? (wakeup_pin_mask & BIT64(PIN_WATER3)) : 0) != 0);
+            result.measure.d_acc_int = (wakeup_pin_mask & BIT64(PIN_INT_ACC)) != 0;
+            result.measure.d_charge = (wakeup_pin_mask & BIT64(PIN_BATT)) != 0;
         }
     }
 
@@ -69,7 +81,11 @@ void app_main(void)
 
     // Initialize NVS
     esp_err_t err = init_nvs();
-    err = read_nvs_menu();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE("main", "NVS init error: %s", esp_err_to_name(err));
+    }
+    read_nvs_menu();
 
     result.measure.internal_temp = get_temperature_sensor();
     // result.measure.temp = result.measure.internal_temp;
@@ -78,13 +94,14 @@ void app_main(void)
     xTaskCreate(dallas_task, "dallas_task", 1024 * 4, NULL, configMAX_PRIORITIES - 10, &xTaskDallas);
     xTaskNotifyGive(xTaskDallas);
 
-    // Light, Water
-    xTaskCreate(dio_task, "dio_task", 1024 * 4, NULL, configMAX_PRIORITIES - 2, &xTaskDIO);
-    // xTaskNotifyGive(xTaskDIO); //Notify from xTaskI2C
-
     xTaskCreate(i2c_task, "i2c_task", 1024 * 4, NULL, configMAX_PRIORITIES - 2, &xTaskI2C);
-    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetValueWithOverwrite);
+
+    // Light, Water
+    xTaskCreate(dio_task, "dio_task", 1024 * 4, NULL, configMAX_PRIORITIES - 3, &xTaskDIO);
+    xTaskNotifyGive(xTaskDIO); // Notify from xTaskI2C
+
     // xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
+    //  xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
 
     xTaskCreate(wifi_task, "wifi_task", 1024 * 2, NULL, configMAX_PRIORITIES - 4, &xHandleWifi);
 
@@ -100,71 +117,61 @@ void app_main(void)
         xEventGroupSetBits(status_event_group, NOW_CHARGE);
     }
 
-    EventBits_t uxBits;
-
-    // время ожидания
+    // время ожидания в мин
     int wait = get_menu_val_by_id("waitnb");
 
-    if (get_charge() || wait == 1000) // идет зарядка или демонстрационный режим, без сна
+    // время сна в мин
+    int sleeptime = get_menu_val_by_id("time");
+
+    if (get_charge() || wait == 1000 || sleeptime <= wait) // идет зарядка или демонстрационный режим, без сна
     {
         if (xHandleWifi)
             xTaskNotifyGive(xHandleWifi); // включаем WiFi
     };
 
     const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE | TEST_MODE_UPDATED;
-
-    uxBits = xEventGroupWaitBits(
-        status_event_group, // The event group being tested.
-        nowake | END_RADIO, // The bits within the event group to wait for.
-        pdFALSE,            // BIT_0 & BIT_1 should be cleared before returning.
-        pdFALSE,            // ОБА
-        wait * 60000 / portTICK_PERIOD_MS);
+    EventBits_t uxBits = 0;
 
     history[history_pos] = result;
 
-    if (!((uxBits & END_RADIO) != 0 && (uxBits & (nowake)) == 0))
+    do // Ждем условий для засыпания
     {
-        do // Ждем истечения таймаута
+        wait = get_menu_val_by_id("waitnb");
+        sleeptime = get_menu_val_by_id("time");
+
+        // Единственное ожидание: END_RADIO - радио закончило, либо активное событие
+        // (терминал/WiFi/зарядка/тест), которое сбрасывает таймер wait минут.
+        // Истечение таймера без событий - выход из цикла и сон.
+        uxBits = xEventGroupWaitBits(
+            status_event_group,
+            END_RADIO | nowake,
+            pdTRUE,  // очищаем найденные биты
+            pdFALSE, // любой из битов
+            wait * 60000 / portTICK_PERIOD_MS);
+
+        history[history_pos] = result;
+
+        if ((uxBits & nowake) == 0)
+            break; // END_RADIO пришел или таймер истек без событий — пора спать
+
+        if (uxBits & TEST_MODE_UPDATED)
+            history_pos = (history_pos + 1) % HISTORY_SIZE;
+
+        // на зарядке не спим: даем поработать другим задачам и продолжаем цикл
+        if (get_charge())
         {
-            wait = get_menu_val_by_id("waitnb");
+            xEventGroupSetBits(status_event_group, NOW_CHARGE);
+            vTaskDelay(10000 / portTICK_PERIOD_MS); // пауза для остальных задач
+            uxBits = nowake; // не выходим из цикла на зарядке
+        }
 
-            uxBits = xEventGroupWaitBits(
-                status_event_group, // The event group being tested.
-                nowake,             // The bits within the event group to wait for.
-                pdTRUE,             // BIT_0 & BIT_1 should be cleared before returning.
-                pdFALSE,            // ОБА
-                wait * 60000 / portTICK_PERIOD_MS);
-
-            if ((uxBits & (NB_TERMINAL)) == 0)
-                ESP_LOGD("main", "Wait end. uxBits: 0x%lx", uxBits);
-
-            history[history_pos] = result;
-
-            vTaskDelay(10000 / portTICK_PERIOD_MS);
-
-            // не засыпаем совсем, если на зарядке
-            if (get_charge())
-            {
-                xEventGroupSetBits(status_event_group, NOW_CHARGE);
-                continue;
-            }
-
-            if (uxBits & TEST_MODE_UPDATED)
-            {
-                history_pos = (history_pos + 1) % HISTORY_SIZE;
-            }
-
-        } while (((uxBits & (nowake)) != 0));
-    }
+    } while (uxBits & nowake);
 
     // принудительно заканчиваем работу NBIoT и WiFi
     xEventGroupSetBits(status_event_group, END_WORK_NBIOT | END_WORK_WIFI);
     // настраиваем INT
     xTaskNotify(xTaskI2C, NOTYFY_SENSOR_SET_MAGACC_INT, eSetValueWithOverwrite);
     vTaskDelay(20 / portTICK_PERIOD_MS); // 10 мало
-
-    // время сна в мин
-    int sleeptime = get_menu_val_by_id("time");
 
     uint64_t wake_mask = dio_check((BIT64(PIN_BATT) | BIT64(PIN_INT_ACC)));
 

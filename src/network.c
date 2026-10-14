@@ -348,13 +348,21 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
 
 static esp_err_t menu_post_handler(httpd_req_t *req)
 {
+    // Тело формы должно целиком укладываться в network_buf
+    if (req->content_len >= sizeof(network_buf))
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Content too long");
+        return ESP_FAIL;
+    }
+
     int remaining = req->content_len;
+    int received = 0;
     int try = 3;
     while (remaining > 0 && try > 0)
     {
         /* Read the data for the request */
-        int ret = 0;
-        if ((ret = httpd_req_recv(req, network_buf, MIN(remaining, sizeof(network_buf)))) <= 0)
+        int ret = httpd_req_recv(req, network_buf + received, remaining);
+        if (ret <= 0)
         {
             if (ret == HTTPD_SOCK_ERR_TIMEOUT)
             {
@@ -366,33 +374,39 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
 
+        received += ret;
         remaining -= ret;
-
-        /* Log data received */
-        // ESP_LOGI(TAGH, "=========== RECEIVED DATA ==========");
-        // ESP_LOGI(TAGH, "%.*s", ret, buf);
-        // ESP_LOGI(TAGH, "====================================");
     }
 
-    network_buf[req->content_len] = '\0';
+    if (remaining > 0)
+    {
+        httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "Incomplete request");
+        return ESP_FAIL;
+    }
+
+    network_buf[received] = '\0';
 
     char *s = network_buf;
     char name[16];
     int mac2 = 0;
     uint8_t addr[6];
-    while (s && s < (network_buf + req->content_len))
+    while (s && s < (network_buf + received))
     {
+        char *amp = strchr(s, '&');
+        if (amp)
+            *amp = '\0'; // отсекаем текущий токен до '&'
         char *e = strchr(s, '=');
+        if (!e)
+            break; // токен без '=' — прекращаем разбор
         *e = '\0';
-        strncpy(name, s, sizeof(name));
+        strncpy(name, s, sizeof(name) - 1);
+        name[sizeof(name) - 1] = '\0'; // гарантируем завершение строки
         int v = 0;
-        if (strncmp(name, "ip", 2) == 0)
+        if (strncmp(name, "ipaddr", 2) == 0)
         {
-            int parsed = sscanf((const char *)e + 1, "%hhu.%hhu.%hhu.%hhu", &addr[0], &addr[1], &addr[2], &addr[3]);
-            if (parsed == 4)
-            {
-                v = (addr[0] << 0) | (addr[1] << 8) | (addr[2] << 16) | (addr[3] << 24);
-            }
+            uint32_t ip = esp_ip4addr_aton((const char *)e + 1);
+            if (ip != INADDR_NONE)
+                v = (int)ip;
         }
         else if (strncmp(name, "MAC1", 4) == 0)
         {
@@ -423,9 +437,7 @@ static esp_err_t menu_post_handler(httpd_req_t *req)
         // ESP_LOGD("menu_post_handler", "Name  \"%s\" : \"%i\"", name, v);
         set_menu_val_by_id(name, v);
 
-        s = strchr(e + 1, '&');
-        if (s)
-            s = s + 1;
+        s = amp ? amp + 1 : NULL;
     }
 
     // End response
@@ -621,6 +633,14 @@ esp_err_t update_post_handler(httpd_req_t *req)
         remaining -= recv_len;
     }
 
+    // если не все данные получены - не финализируем (оборванная загрузка)
+    if (remaining != 0)
+    {
+        esp_ota_abort(ota_handle);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Incomplete upload");
+        return ESP_FAIL;
+    }
+
     if (file_id == ESP_IMAGE_HEADER_MAGIC)
     {
         // Validate and switch to new OTA image and reboot
@@ -726,6 +746,13 @@ static esp_err_t ws_handler(httpd_req_t *req)
         ESP_LOGI(TAGH, "Got packet with message: %s", ws_pkt.payload);
     }
 
+    // пустой кадр (len == 0): payload не выделялся, разбор не выполняем
+    if (ws_pkt.len == 0 || ws_pkt.payload == NULL)
+    {
+        free(buf);
+        return ESP_OK;
+    }
+
     ESP_LOGI(TAGH, "ws_handler: httpd_handle_t=%p, sockfd=%d, client_info:%d", req->handle, httpd_req_to_sockfd(req), httpd_ws_get_fd_info(req->handle, httpd_req_to_sockfd(req)));
 
     const char *initstring = "openws:";
@@ -762,6 +789,51 @@ static esp_err_t ws_handler(httpd_req_t *req)
         }
 
         reset_sleep_timeout();
+    }
+
+    // Калибровка акселерометра с веб-страницы: cal:<n>, n=0..5
+    const char *calstring = "cal:";
+    if (strncmp(calstring, (const char *)ws_pkt.payload, strlen(calstring)) == 0)
+    {
+        int n = atoi((const char *)ws_pkt.payload + strlen(calstring));
+        if (n >= 0 && n < 6)
+        {
+            static const char *cal_ids[6] = {"calaccX0", "calaccX1", "calaccY0", "calaccY1", "calaccZ0", "calaccZ1"};
+            int axis = n / 2;
+            // фиксируем сглаженное сырое показание соответствующей оси
+            set_menu_val_by_id(cal_ids[n], acc_raw_avg[axis]);
+
+            char rep[32];
+            int rl = snprintf(rep, sizeof(rep), "calres:%d:%d", n, acc_raw_avg[axis]);
+            httpd_ws_frame_t rep_pkt;
+            memset(&rep_pkt, 0, sizeof(rep_pkt));
+            rep_pkt.type = HTTPD_WS_TYPE_TEXT;
+            rep_pkt.payload = (uint8_t *)rep;
+            rep_pkt.len = rl;
+            httpd_ws_send_frame(req, &rep_pkt);
+            ESP_LOGI(TAGH, "Cal %s = %d", cal_ids[n], acc_raw_avg[axis]);
+        }
+        reset_sleep_timeout();
+    }
+
+    const char *startstring = "start:";
+    if (strncmp(startstring, (const char *)ws_pkt.payload, strlen(startstring)) == 0)
+    {
+        int ch = atoi((const char *)ws_pkt.payload + strlen(startstring));
+        if (ch > 0)
+        {
+            if (xTaskDallas)
+                xTaskNotifyGive(xTaskDallas);
+            if (xTaskI2C)
+                xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetValueWithOverwrite);
+            // water_cont_measure(false);
+            // light_measure(0);
+            if (xTaskDIO)
+                xTaskNotifyGive(xTaskDIO);
+
+            xEventGroupSetBits(status_event_group, TEST_MODE_UPDATED);
+            ESP_LOGD(TAGH, "Start measure");
+        }
     }
 
     free(buf);
