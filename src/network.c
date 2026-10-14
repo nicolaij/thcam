@@ -822,6 +822,8 @@ static esp_err_t ws_handler(httpd_req_t *req)
         int ch = atoi((const char *)ws_pkt.payload + strlen(startstring));
         if (ch > 0)
         {
+            xEventGroupSetBits(status_event_group, START_SENSORS_UPDATE);
+
             if (xTaskDallas)
                 xTaskNotifyGive(xTaskDallas);
             if (xTaskI2C)
@@ -831,7 +833,6 @@ static esp_err_t ws_handler(httpd_req_t *req)
             if (xTaskDIO)
                 xTaskNotifyGive(xTaskDIO);
 
-            xEventGroupSetBits(status_event_group, TEST_MODE_UPDATED);
             ESP_LOGD(TAGH, "Start measure");
         }
     }

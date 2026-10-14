@@ -887,8 +887,7 @@ uint64_t dio_check(uint64_t wake_mask)
         {
             wake_mask |= BIT64(PIN_WATER1);
         }
-
-        if (gpio_get_level(PIN_WATER2) == 0)
+        else if (gpio_get_level(PIN_WATER2) == 0)
         {
             wake_mask |= BIT64(PIN_WATER2);
         }
@@ -1001,6 +1000,8 @@ void btn_task(void *arg)
         {
             if ((esp_timer_get_time() - start_time) > (sleeptime * 60LL * 1000000LL))
             {
+                xEventGroupSetBits(status_event_group, START_SENSORS_UPDATE);
+
                 if (xTaskDallas)
                     xTaskNotifyGive(xTaskDallas);
                 if (xTaskI2C)
@@ -1011,10 +1012,6 @@ void btn_task(void *arg)
                     xTaskNotifyGive(xTaskDIO);
 
                 start_time = esp_timer_get_time();
-
-                vTaskDelay(3000 / portTICK_PERIOD_MS);
-
-                xEventGroupSetBits(status_event_group, TEST_MODE_UPDATED);
             }
         }
 

@@ -129,8 +129,14 @@ void app_main(void)
             xTaskNotifyGive(xHandleWifi); // включаем WiFi
     };
 
-    const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE | TEST_MODE_UPDATED;
+    const EventBits_t nowake = SERIAL_TERMINAL_ACTIVE | WIFI_ACTIVE | NOW_CHARGE | START_SENSORS_UPDATE;
     EventBits_t uxBits = 0;
+    // Была ли активность (терминал/WiFi/зарядка/обновление датчиков) за время работы.
+    // Если была - END_RADIO больше не прерывает работу: ждём истечения таймаута,
+    // иначе сессия WiFi/терминала обрывается сразу после ответа модуля, т.к. бит
+    // активности уже сброшен (xEventGroupWaitBits очищает найденные биты).
+    bool activity = false;
+    bool sleep_now = false;
 
     history[history_pos] = result;
 
@@ -148,24 +154,36 @@ void app_main(void)
             pdTRUE,  // очищаем найденные биты
             pdFALSE, // любой из битов
             wait * 60000 / portTICK_PERIOD_MS);
+        
+        ESP_LOGD("wait", "status_event_group=0x%x",uxBits);
+
+        // активность запоминаем: сам бит уже очищен, а решение о сне принимается
+        // ниже именно по факту активности за время работы
+        if (uxBits & nowake)
+            activity = true;
+
+        if (uxBits & START_SENSORS_UPDATE)
+        {
+            history_pos = (history_pos + 1) % HISTORY_SIZE;
+            vTaskDelay(3000 / portTICK_PERIOD_MS); // пауза для завершения измерений
+        }
 
         history[history_pos] = result;
-
-        if ((uxBits & nowake) == 0)
-            break; // END_RADIO пришел или таймер истек без событий — пора спать
-
-        if (uxBits & TEST_MODE_UPDATED)
-            history_pos = (history_pos + 1) % HISTORY_SIZE;
 
         // на зарядке не спим: даем поработать другим задачам и продолжаем цикл
         if (get_charge())
         {
             xEventGroupSetBits(status_event_group, NOW_CHARGE);
-            vTaskDelay(10000 / portTICK_PERIOD_MS); // пауза для остальных задач
-            uxBits = nowake; // не выходим из цикла на зарядке
+            vTaskDelay(30000 / portTICK_PERIOD_MS); // пауза для остальных задач
+            if (xHandleNB)
+                xTaskNotifyGive(xHandleNB); // включаем NBIoT модуль для контроля напряжения
+            uxBits = nowake;                // не выходим из цикла на зарядке
         }
 
-    } while (uxBits & nowake);
+        // Спим, если: (1) истёк таймаут - в uxBits нет ни одного бита из маски;
+        // (2) радио закончило работу (END_RADIO), а активности за это время не было.
+        sleep_now = ((uxBits & (END_RADIO | nowake)) == 0) || ((uxBits & END_RADIO) && !activity);
+    } while (!sleep_now);
 
     // принудительно заканчиваем работу NBIoT и WiFi
     xEventGroupSetBits(status_event_group, END_WORK_NBIOT | END_WORK_WIFI);

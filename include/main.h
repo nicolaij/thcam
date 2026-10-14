@@ -53,7 +53,7 @@
 // #define END_DS_SENSOR BIT10
 // #define END_TH_SENSOR BIT11
 #define READ_MAG_SENSOR BIT12
-#define TEST_MODE_UPDATED BIT13
+#define START_SENSORS_UPDATE BIT13
 #define REBOOT_NOW BIT14
 #define END_DS18B20 BIT15
 
@@ -200,7 +200,7 @@ extern int acc_raw_mg[3];
 // Сглаженные сырые показания акселерометра (мг) - для фиксации в калибровке
 extern int acc_raw_avg[3];
 
-#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f,\"Water\":%.1f,\"WaterK\":%.1f,\"WaterTemp\":%.1f,\"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\",\"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"TAC\":%u,\"CI\":%u}"
+#define OUT_JSON "{\"id\":\"cam%d\",\"num\":%u,\"dt\":\"%s\",\"Battery\":%.3f,\"RSSI\":%.0f,\"Light\":%.1f, \"Water\":%.1f,\"WaterK\":%.1f,\"WaterTemp\":%.1f, \"Temp\":%.1f,\"Humidity\":%.1f,\"Flags\":\"0x%04X\", \"Acc\":[%.2f,%.2f,%.2f],\"Mag\":[%.2f,%.2f,%.2f],\"TAC\":%u,\"CI\":%u}"
 #define OUT_MEASURE_ACC_VARS(prefix) prefix.acc[0], prefix.acc[1], prefix.acc[2], prefix.mag[0], prefix.mag[1], prefix.mag[2]
 #define OUT_MEASURE_VARS(prefix) prefix.nbbattery, prefix.rssi, prefix.light, prefix.water, prefix.waterk, prefix.water_temp, prefix.temp, prefix.humidity, prefix.flags, OUT_MEASURE_ACC_VARS(prefix), prefix.tac, prefix.ci
 #define OUT_MEASURE_HEADERS "Battery, RSSI, Light, Water, WaterK, WaterTemp, Temp, Humidity, Flags, AccX, AccY, AccZ, MagX, MagY, MagZ, TAC, CI"
