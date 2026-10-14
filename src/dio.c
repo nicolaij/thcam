@@ -33,6 +33,7 @@ QueueHandle_t xQueueLed = NULL;
 adc_cali_handle_t cal_handle1;
 adc_cali_handle_t cal_handle2;
 adc_cali_handle_t l_cal_handle;
+adc_cali_handle_t b_cal_handle;
 
 adc_continuous_handle_t cont_handle;
 
@@ -151,12 +152,6 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
 
 static void light_adc_init()
 {
-    //-------------ADC1 Init---------------//
-    adc_oneshot_unit_init_cfg_t init_config1 = {
-        .unit_id = ADC_UNIT_1,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &l_adc_handle));
-
     //-------------ADC1 Config---------------//
     adc_oneshot_chan_cfg_t config = {
         .bitwidth = ADC_BITWIDTH_12,
@@ -172,6 +167,24 @@ static void light_adc_init()
         .bitwidth = ADC_BITWIDTH_12,
     };
     ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&l_cali_config, &l_cal_handle));
+}
+
+// АЦП для измерения напряжения батареи (PIN_BATT) - читается в get_batt_mv()
+static void batt_adc_init()
+{
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_12,
+        .atten = ADC_ATTEN_DB_12,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(l_adc_handle, PIN_BATT, &config));
+
+    adc_cali_curve_fitting_config_t cali_config = {
+        .unit_id = ADC_UNIT_1,
+        .chan = PIN_BATT,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12,
+    };
+    ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_config, &b_cal_handle));
 }
 
 static void water_continuous_adc_init()
@@ -747,6 +760,14 @@ void dio_task(void *arg)
     // install gpio isr service
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1));
 
+    //-------------ADC1 Init---------------//
+    adc_oneshot_unit_init_cfg_t init_config1 = {
+        .unit_id = ADC_UNIT_1,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &l_adc_handle));
+
+    batt_adc_init();
+
     // zero-initialize the config structure.
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_POSEDGE;
@@ -787,9 +808,28 @@ void dio_task(void *arg)
     }
 }
 
-int get_charge()
+// Напряжение на PIN_BATT (мВ): реальное (с делителем) и сырое в скобках - для лога
+int get_batt_mv()
 {
-    return gpio_get_level(PIN_BATT);
+    int batt_mv = 0;
+
+    float k_real = 4150.0 / 2070.0;
+
+    // напряжение на PIN_BATT (ADC1_CH0) - для контроля в логе
+    if (l_adc_handle && b_cal_handle)
+    {
+        esp_err_t e = adc_oneshot_get_calibrated_result(l_adc_handle, b_cal_handle, PIN_BATT, &batt_mv);
+        if (e == ESP_OK)
+            ESP_LOGI(TAG, "Battery (PIN_BATT): %d mV (%d)", (int)(batt_mv * k_real), batt_mv);
+        else
+            ESP_LOGW(TAG, "Battery (PIN_BATT): ошибка измерения: %s", esp_err_to_name(e));
+    }
+    else
+    {
+        ESP_LOGD(TAG, "Battery (PIN_BATT): АЦП ещё не настроен");
+    }
+
+    return (int)(batt_mv * k_real);
 };
 
 uint64_t dio_check(uint64_t wake_mask)
@@ -1012,6 +1052,10 @@ void btn_task(void *arg)
                     xTaskNotifyGive(xTaskDIO);
 
                 start_time = esp_timer_get_time();
+
+                //вдруг поменялось
+                sleeptime = get_menu_val_by_id("time");
+                wait = get_menu_val_by_id("waitnb");
             }
         }
 

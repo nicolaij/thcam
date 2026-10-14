@@ -118,7 +118,9 @@ void light_measure(int test_count);
 
 uint64_t dio_sleep(uint64_t wake_mask);
 uint64_t dio_check(uint64_t wake_mask);
-int get_charge();
+
+//читаем АЦП от зарядника
+int get_batt_mv();
 
 esp_err_t print_atcmd(const char *cmd, char *buffer);
 

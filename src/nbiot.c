@@ -32,7 +32,7 @@ void modem_task(void *arg)
 
     int try_counter = 0;
 
-    strcpy(net_status_current, "OFF");
+    strcpy(net_status_current, "Неизвестно");
     // result.measure.d_nbiot_error = true;
 
     int protocol = 1; // ESPNOW = 0, TCP = 1, UDP =2
@@ -164,7 +164,7 @@ void modem_task(void *arg)
             if ((xEventGroupGetBits(status_event_group) & END_WORK_NBIOT))
                 break;
 
-            strcpy(net_status_current, "ready");
+            strcpy(net_status_current, "отвечает");
             // result.measure.d_nbiot_error = false;
 
             // если запускаем терминал - стоп работа с модулем
@@ -197,7 +197,7 @@ void modem_task(void *arg)
                 };
             };
 
-            if (get_charge())
+            if (gpio_get_level(PIN_BATT))
             {
                 result.ttime = time(0); // ОБНОВЛЯЕМ ВРЕМЯ НА ЗАРЯДКЕ
                                         /*
@@ -221,7 +221,7 @@ void modem_task(void *arg)
             if (cpin == false)
             {
                 if (strnstr(net_status_current, "Error", sizeof(net_status_current)) == NULL) // Если ошибка SIM - то не перезаписываем ее
-                    strcpy(net_status_current, "Check SIM...");
+                    strcpy(net_status_current, "Проверка SIM...");
 
                 // Enter PIN
                 ee = at_reply_wait_OK("AT+CPIN?\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
@@ -271,7 +271,7 @@ void modem_task(void *arg)
             }
 
             // result.measure.d_nbiot_error = false;
-            strcpy(net_status_current, "Network search...");
+            strcpy(net_status_current, "Поиск сети...");
 
             if (first_run_completed == false)
             {

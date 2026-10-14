@@ -112,7 +112,9 @@ void app_main(void)
 
     xTaskCreate(console_task, "console_task", 1024 * 2, NULL, configMAX_PRIORITIES - 12, NULL);
 
-    if (result.measure.d_charge || get_charge()) // проснулись от зарядки
+    taskYIELD();
+
+    if (result.measure.d_charge || gpio_get_level(PIN_BATT)) // проснулись от зарядки
     {
         xEventGroupSetBits(status_event_group, NOW_CHARGE);
     }
@@ -123,7 +125,7 @@ void app_main(void)
     // время сна в мин
     int sleeptime = get_menu_val_by_id("time");
 
-    if (get_charge() || wait == 1000 || sleeptime <= wait) // идет зарядка или демонстрационный режим, без сна
+    if (gpio_get_level(PIN_BATT) || wait == 1000 || sleeptime <= wait) // идет зарядка или демонстрационный режим, без сна
     {
         if (xHandleWifi)
             xTaskNotifyGive(xHandleWifi); // включаем WiFi
@@ -171,8 +173,9 @@ void app_main(void)
         history[history_pos] = result;
 
         // на зарядке не спим: даем поработать другим задачам и продолжаем цикл
-        if (get_charge())
+        if (gpio_get_level(PIN_BATT))
         {
+            get_batt_mv();                  // напряжение на PIN_BATT в лог
             xEventGroupSetBits(status_event_group, NOW_CHARGE);
             vTaskDelay(30000 / portTICK_PERIOD_MS); // пауза для остальных задач
             if (xHandleNB)
@@ -240,7 +243,7 @@ void app_main(void)
         history_pos = (history_pos + 1) % HISTORY_SIZE;
 
     // если зарядка - сон 5 мин.
-    // if (result.measure.d_charge || get_charge())
+    // if (result.measure.d_charge || gpio_get_level(PIN_BATT))
     //    sleeptime = 5;
 
     ESP_LOGW("main", "Go sleep: %d min", sleeptime);
