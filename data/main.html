@@ -615,7 +615,7 @@
 <body>
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <div class="brand"><span class="dot"></span>THCam</div>
+      <div class="brand"><span class="dot"></span><span id="devname">THCam</span></div>
       <nav class="topnav">
         <a href="/d3">Буфер данных</a>
         <a href="/d.csv">CSV</a>
@@ -786,7 +786,7 @@
         <h2>Калибровка акселерометра</h2>
       </div>
       <button type="button" class="btn" id="calibbtn" onclick="calibAction()">Начать калибровку</button>
-      <div class="calib-state" id="calibstate">Нажмите «Начать калибровку». Плату нужно будет поочерёдно ставить в 6 положений. После калибровки заново запишите положения «Открыто/Закрыто».</div>
+      <div class="calib-state" id="calibstate">Нажмите «Начать калибровку». Плату нужно будет поочерёдно ставить в 6 положений.</div>
       <div class="calib-log" id="caliblog"></div>
     </section>
 
@@ -904,13 +904,13 @@
       var st = document.getElementById("calibstate");
       var btn = document.getElementById("calibbtn");
       if (calIndex < 0) {
-        st.innerHTML = "Нажмите «Начать калибровку». Плату нужно будет поочерёдно ставить в 6 положений. После калибровки заново запишите положения «Открыто/Закрыто».";
+        st.innerHTML = "Нажмите «Начать калибровку». Плату нужно будет поочерёдно ставить в 6 положений.";
         btn.innerText = "Начать калибровку";
       } else if (calIndex < 6) {
         st.innerHTML = "Шаг " + (calIndex + 1) + "/6: " + CAL_STEPS[calIndex].text + ". Поставьте плату и нажмите «Зафиксировать».";
         btn.innerText = "Зафиксировать";
       } else {
-        st.innerHTML = "Калибровка завершена. Теперь заново запишите положения «Открыто» и «Закрыто» (галочки ниже).";
+        st.innerHTML = "Калибровка завершена.";
         btn.innerText = "Готово";
       }
     }
@@ -922,6 +922,13 @@
         })
         .then((data) => {
           document.getElementById("settingscontent").innerHTML = data;
+
+          // название устройства с номером датчика (настройка idn), например "THCam 11"
+          const idn = document.getElementById("idn");
+          const devname = "THCam" + (idn && idn.value.trim() ? " " + idn.value.trim() : "");
+          document.getElementById("devname").textContent = devname;
+          document.title = devname + " — настройки";
+
           if (document.getElementById("enableopenmagX").innerHTML) use = "mag";
           if (document.getElementById("enableclosemagX").innerHTML) use = "mag";
           if (document.getElementById("enableopenaccX").innerHTML) use = "acc";
