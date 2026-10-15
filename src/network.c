@@ -309,7 +309,7 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "Firmware: %s (%s) MAC:" MACSTR, app_ver->version, app_ver->date, MAC2STR(mac));
     l += snprintf(&network_buf[l], TRANSFER_SIZE - l, ", STATUS: ");
 
-    if ((xEventGroupGetBits(status_event_group) & NOW_CHARGE) || gpio_get_level(PIN_BATT))
+    if (gpio_get_level(PIN_BATT))
     {
         l += snprintf(&network_buf[l], TRANSFER_SIZE - l, "<b>charge %d mv... </b>", get_batt_mv());
     }

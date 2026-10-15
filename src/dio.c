@@ -411,6 +411,7 @@ void water_cont_measure(int mode, bool printdata)
 
     // xTaskNotify(xTaskI2C, (NOTYFY_EXPANDER_RESET), eSetBits);
     // xTaskNotify(xTaskI2C, (NOTYFY_EXPANDER_P0_PULLDIS | NOTYFY_EXPANDER_P1_PULLDIS), eSetBits);
+    xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_PULLDOWN | NOTYFY_EXPANDER_P0_PULLDOWN, eSetBits);
 
     ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_FLOATING));
     ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_FLOATING));
@@ -878,48 +879,34 @@ uint64_t dio_check(uint64_t wake_mask)
     {
         gpio_pulldown_en(PIN_LIGHT);
         result.measure.d_light_mode = 1;
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-        if (gpio_get_level(PIN_LIGHT) == 1)
-        {
-            // нет смысла держать подтяжку. Экономим энергию
-            gpio_pulldown_dis(PIN_LIGHT);
-            result.measure.d_light_mode = 0;
-        }
     }
 
     if (bootCount % 2 == 1)
     {
-        // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP, eSetBits);
-    }
-    else
-    {
-        // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP, eSetBits);
-    }
-    // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P0_DOWN, eSetBits);
-
-    vTaskDelay(50 / portTICK_PERIOD_MS);
-
-    if (bootCount % 2 == 1)
-    {
-        // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP, eSetBits);
-        //  wake_mask |= BIT64(PIN_WATER2);
-        if (gpio_get_level(PIN_WATER1) != 0)
-        {
-            // gpio_pulldown_en(PIN_WATER1);
-            result.measure.d_wet_mode = 1;
-        }
-    }
-    else
-    {
-        // wake_mask |= BIT64(PIN_WATER1);
+        // Подтяжка PIN_WATER1 через 10к к + питания
+        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP, eSetBits); //NOTYFY_EXPANDER_P1_PULLDOWN - автоматически
+        // ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
+        vTaskDelay(50 / portTICK_PERIOD_MS);
         if (gpio_get_level(PIN_WATER2) != 0)
         {
-            // gpio_pulldown_en(PIN_WATER2);
+            gpio_pulldown_en(PIN_WATER2);
+            result.measure.d_wet_mode = 1;
+        }
+    }
+    else
+    {
+        // Подтяжка PIN_WATER2 через 10к к + питания
+        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP, eSetBits); //NOTYFY_EXPANDER_P0_PULLDOWN - автоматически
+        // ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+        if (gpio_get_level(PIN_WATER1) != 0)
+        {
+            gpio_pulldown_en(PIN_WATER1);
             result.measure.d_wet_mode = 1;
         }
     }
 
-    vTaskDelay(50 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
 
     if (gpio_get_level(PIN_WATER1) != gpio_get_level(PIN_WATER2))
     {
@@ -934,12 +921,17 @@ uint64_t dio_check(uint64_t wake_mask)
     }
     else
     {
-        // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P1_UP, eSetBits);
+        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_PULLDOWN | NOTYFY_EXPANDER_P1_PULLDOWN, eSetBits);
     }
 
     if (gpio_get_level(PIN_LIGHT) == 0)
     {
         wake_mask |= BIT64(PIN_LIGHT);
+    }
+    else
+    {
+        // нет смысла держать подтяжку. Экономим энергию
+        gpio_pulldown_dis(PIN_LIGHT);
     }
 
 #if HW != 11
@@ -1053,7 +1045,7 @@ void btn_task(void *arg)
 
                 start_time = esp_timer_get_time();
 
-                //вдруг поменялось
+                // вдруг поменялось
                 sleeptime = get_menu_val_by_id("time");
                 wait = get_menu_val_by_id("waitnb");
             }

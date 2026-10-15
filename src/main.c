@@ -100,8 +100,7 @@ void app_main(void)
     xTaskCreate(dio_task, "dio_task", 1024 * 4, NULL, configMAX_PRIORITIES - 3, &xTaskDIO);
     xTaskNotifyGive(xTaskDIO); // Notify from xTaskI2C
 
-    // xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
-    //  xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
+    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
 
     xTaskCreate(wifi_task, "wifi_task", 1024 * 2, NULL, configMAX_PRIORITIES - 4, &xHandleWifi);
 
@@ -156,8 +155,8 @@ void app_main(void)
             pdTRUE,  // очищаем найденные биты
             pdFALSE, // любой из битов
             wait * 60000 / portTICK_PERIOD_MS);
-        
-        ESP_LOGD("wait", "status_event_group=0x%x",uxBits);
+
+        ESP_LOGD("wait", "status_event_group=0x%x", uxBits);
 
         // активность запоминаем: сам бит уже очищен, а решение о сне принимается
         // ниже именно по факту активности за время работы
@@ -175,12 +174,18 @@ void app_main(void)
         // на зарядке не спим: даем поработать другим задачам и продолжаем цикл
         if (gpio_get_level(PIN_BATT))
         {
-            get_batt_mv();                  // напряжение на PIN_BATT в лог
-            xEventGroupSetBits(status_event_group, NOW_CHARGE);
+            get_batt_mv(); // напряжение на PIN_BATT в лог
+
+            if (xHandleWifi)
+                xTaskNotifyGive(xHandleWifi); // включаем WiFi
+
             vTaskDelay(30000 / portTICK_PERIOD_MS); // пауза для остальных задач
+
             if (xHandleNB)
                 xTaskNotifyGive(xHandleNB); // включаем NBIoT модуль для контроля напряжения
-            uxBits = nowake;                // не выходим из цикла на зарядке
+
+            xEventGroupSetBits(status_event_group, NOW_CHARGE);
+            uxBits = nowake; // не выходим из цикла на зарядке
         }
 
         // Спим, если: (1) истёк таймаут - в uxBits нет ни одного бита из маски;
@@ -196,13 +201,14 @@ void app_main(void)
 
     uint64_t wake_mask = dio_check((BIT64(PIN_BATT) | BIT64(PIN_INT_ACC)));
 
+    /*
     // если затопление или засвет - сон короче в 2 раза.
-    if ((wake_mask & BIT64(PIN_WATER1)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
-    {
-        if (sleeptime > 15)
-            sleeptime = get_menu_val_by_id("time") / 2;
-    }
-
+        if ((wake_mask & BIT64(PIN_WATER1)) == 0 || (wake_mask & BIT64(PIN_LIGHT)) == 0)
+        {
+            if (sleeptime > 15)
+                sleeptime = get_menu_val_by_id("time") / 2;
+        }
+    */
     // если проснулись от затопления или засвета или изменения положения - следующий сон 5 мин.
     if (result.measure.d_light || result.measure.d_water || result.measure.d_acc_int)
     {
