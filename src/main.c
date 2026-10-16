@@ -27,6 +27,7 @@ TaskHandle_t xHandleWifi = NULL;
 
 void app_main(void)
 {
+    char datetime[DATETIME_STR_SIZE]; // общий буфер строки даты/времени
 
     // защита от мусора в RTC-памяти: history_pos вне диапазона -> сброс в начало
     if (history_pos >= HISTORY_SIZE)
@@ -73,7 +74,8 @@ void app_main(void)
     bootCount++;
     //  "Количество загрузок: "
     ESP_LOGI("main", "Boot number: %d", bootCount);
-    ESP_LOGI("main", "Current date/time: %s", get_datetime(time(0)));
+    get_datetime_str(time(0), datetime, sizeof(datetime));
+    ESP_LOGI("main", "Current date/time: %s", datetime);
 
     ESP_LOGI("main", "Free Heap: %u bytes", xPortGetFreeHeapSize());
 
@@ -95,12 +97,10 @@ void app_main(void)
     xTaskNotifyGive(xTaskDallas);
 
     xTaskCreate(i2c_task, "i2c_task", 1024 * 4, NULL, configMAX_PRIORITIES - 2, &xTaskI2C);
+    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
 
     // Light, Water
     xTaskCreate(dio_task, "dio_task", 1024 * 4, NULL, configMAX_PRIORITIES - 3, &xTaskDIO);
-    xTaskNotifyGive(xTaskDIO); // Notify from xTaskI2C
-
-    xTaskNotify(xTaskI2C, NOTYFY_SENSOR_TH | NOTYFY_SENSOR_SET_MAGACC | NOTYFY_SENSOR_MAGACC, eSetBits);
 
     xTaskCreate(wifi_task, "wifi_task", 1024 * 2, NULL, configMAX_PRIORITIES - 4, &xHandleWifi);
 
@@ -111,7 +111,9 @@ void app_main(void)
 
     xTaskCreate(console_task, "console_task", 1024 * 2, NULL, configMAX_PRIORITIES - 12, NULL);
 
-    taskYIELD();
+    //taskYIELD();
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    xTaskNotifyGive(xTaskDIO); // Notify from xTaskI2C
 
     if (result.measure.d_charge || gpio_get_level(PIN_BATT)) // проснулись от зарядки
     {
@@ -241,7 +243,8 @@ void app_main(void)
 
     dio_sleep(wake_mask);
 
-    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+    get_datetime_str(result.ttime, datetime, sizeof(datetime));
+    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
     // store only changes: flags, ci
     if (history_pos < 2 || history[history_pos].measure.flags != history[(history_pos - 1) % HISTORY_SIZE].measure.flags || history[history_pos].measure.flags != history[(history_pos - 2) % HISTORY_SIZE].measure.flags ||
@@ -256,7 +259,7 @@ void app_main(void)
 
     uint64_t time_in_us = sleeptime * 60ULL * 1000000ULL;
 
-    ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, wake_mask | BIT(PIN_WATER1) | BIT(PIN_WATER2)));
+    ESP_ERROR_CHECK(gpio_dump_io_configuration(stdout, wake_mask | BIT64(PIN_WATER1) | BIT64(PIN_WATER2)));
     fflush(stdout);
 
     esp_sleep_enable_timer_wakeup(time_in_us);

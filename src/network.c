@@ -301,8 +301,10 @@ static esp_err_t menu_get_handler(httpd_req_t *req)
     reset_sleep_timeout();
 
     int l = 0;
+    char datetime[DATETIME_STR_SIZE];
 
-    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON "<br>", get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+    get_datetime_str(result.ttime, datetime, sizeof(datetime));
+    l += snprintf(&network_buf[l], TRANSFER_SIZE - l, OUT_JSON "<br>", get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
     const esp_app_desc_t *app_ver = esp_app_get_description();
 
@@ -462,8 +464,10 @@ esp_err_t get_history(httpd_req_t *req)
     while (hpos > hend)
     {
         int indx = hpos % HISTORY_SIZE;
+        char datetime[DATETIME_STR_SIZE];
 
-        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%s, %3u, " OUT_MEASURE_FORMATS "\n", get_datetime(history[indx].ttime), history[indx].measure.bootcount, OUT_MEASURE_VARS(history[indx].measure));
+        get_datetime_str(history[indx].ttime, datetime, sizeof(datetime));
+        l += snprintf(&network_buf[l], (TRANSFER_SIZE - l), "%s, %3u, " OUT_MEASURE_FORMATS "\n", datetime, history[indx].measure.bootcount, OUT_MEASURE_VARS(history[indx].measure));
         hpos--;
 
         if ((TRANSFER_SIZE - l) < sizeof(OUT_MEASURE_FORMATS) * 2)
@@ -657,6 +661,12 @@ esp_err_t update_post_handler(httpd_req_t *req)
     else if (file_id == 0x50000)
     {
         const esp_partition_t *storage_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
+        if (storage_partition == NULL)
+        {
+            ESP_LOGE(TAGH, "storage partition not found");
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Storage partition not found");
+            return ESP_FAIL;
+        }
         ESP_ERROR_CHECK(esp_partition_erase_range(storage_partition, 0, 0x50000));
 
         remaining = req->content_len;
@@ -761,10 +771,12 @@ static esp_err_t ws_handler(httpd_req_t *req)
         long long ts = atoll((const char *)ws_pkt.payload + strlen(initstring));
         if (ts > 1715923962LL) // 17 May 2024 05:32:42
         {
+            char datetime[DATETIME_STR_SIZE];
             struct timeval now = {.tv_sec = ts + timezone * 3600}; // UNIX time + timezone offset
             settimeofday(&now, NULL);
 
-            ESP_LOGI(TAGH, "WS set date and time: %s", get_datetime(time(0)));
+            get_datetime_str(time(0), datetime, sizeof(datetime));
+            ESP_LOGI(TAGH, "WS set date and time: %s", datetime);
         }
         need_ws_send = true;
     }

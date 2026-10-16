@@ -173,6 +173,13 @@ esp_err_t set_menu_val_by_id(const char *id, int value)
         int l = strlen(menu[i].id);
         if (ll == l && strncmp(id, menu[i].id, l) == 0)
         {
+            // проверка диапазона (как в консольном меню): значения вне min..max не принимаем
+            if (value < menu[i].min || value > menu[i].max)
+            {
+                ESP_LOGW("NVS", "Значение \"%s\" = %i вне диапазона %i..%i, отклонено", id, value, menu[i].min, menu[i].max);
+                return ESP_ERR_INVALID_ARG;
+            }
+
             if (menu[i].val != value)
             {
                 err = nvs_open("storage", NVS_READWRITE, &my_handle);
@@ -363,6 +370,7 @@ void console_task(void *arg)
     uint8_t serialbuffer[256];
     int selected_menu_id = 0;
     uint8_t *data = serialbuffer;
+    char datetime[DATETIME_STR_SIZE]; // общий буфер строки даты/времени
 
     uint8_t mac_addr[6];
     esp_ip4_addr_t ip_addr;
@@ -432,7 +440,8 @@ void console_task(void *arg)
                 {
                 case -1: // Выводим меню
 
-                    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+                    get_datetime_str(result.ttime, datetime, sizeof(datetime));
+                    ESP_LOGI("result", OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
                     ESP_LOGI("menu", "-------------------------------------------");
                     int i = 0;
@@ -501,7 +510,8 @@ void console_task(void *arg)
                     {
                         int indx = cpos % HISTORY_SIZE;
 
-                        ESP_LOGI("menu", "%s, %3u, " OUT_MEASURE_FORMATS, get_datetime(history[indx].ttime), history[indx].measure.bootcount, OUT_MEASURE_VARS(history[indx].measure));
+                        get_datetime_str(history[indx].ttime, datetime, sizeof(datetime));
+                        ESP_LOGI("menu", "%s, %3u, " OUT_MEASURE_FORMATS, datetime, history[indx].measure.bootcount, OUT_MEASURE_VARS(history[indx].measure));
                         cpos--;
                     }
 

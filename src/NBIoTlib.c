@@ -375,12 +375,23 @@ esp_err_t at_csosend(const int socket, const char *data, const int len_data, cha
     return res;
 }
 
-char *get_datetime(time_t ttime)
+// Формирование строки даты/времени "%Y-%m-%d %T" в буфер вызывающего.
+// Реентерабельно: используется localtime_r и локальная структура tm, общего состояния нет.
+char *get_datetime_str(time_t ttime, char *out, size_t cap)
 {
-    static char datetime[24];
-    struct tm *localtm = localtime(&ttime);
-    strftime(datetime, sizeof(datetime), "%Y-%m-%d %T", localtm);
-    return datetime;
+    struct tm tm_buf;
+
+    if (out == NULL || cap == 0)
+        return out;
+
+    if (localtime_r(&ttime, &tm_buf) == NULL) // некорректное время - пустая строка
+    {
+        out[0] = '\0';
+        return out;
+    }
+
+    strftime(out, cap, "%Y-%m-%d %T", &tm_buf);
+    return out;
 }
 
 esp_err_t apply_command(const char *cmd, size_t len)
@@ -410,9 +421,11 @@ esp_err_t apply_command(const char *cmd, size_t len)
             long long ts = atoll((const char *)item->valuestring);
             if (ts > 1715923962LL) // 17 May 2024 05:32:42
             {
+                char datetime[DATETIME_STR_SIZE];
                 struct timeval now = {.tv_sec = ts + timezone * 3600}; // UNIX time + timezone offset
                 settimeofday(&now, NULL);
-                ESP_LOGI(TAG, "Set date and time: %s", get_datetime(time(0)));
+                get_datetime_str(time(0), datetime, sizeof(datetime));
+                ESP_LOGI(TAG, "Set date and time: %s", datetime);
             }
         }
 
@@ -571,12 +584,16 @@ esp_err_t check_received_message(char *message_data, char *result_data, int chip
             char *s = strchr(rdata, ',');
 
             // len
-            int len = atoi(s + 1);
-            s = strchr(s + 1, ',');
-            if (decode_fromHEX(s + 1, len / 2, result_data, TX_BUF_SIZE) == len / 2)
+            if (s)
             {
-                apply_command((const char *)result_data, len / 2);
-                return ESP_OK;
+                int len = atoi(s + 1);
+                s = strchr(s + 1, ',');
+                if (s && len > 0 &&
+                    decode_fromHEX(s + 1, len / 2, result_data, TX_BUF_SIZE) == len / 2)
+                {
+                    apply_command((const char *)result_data, len / 2);
+                    return ESP_OK;
+                }
             }
         }
     }
@@ -721,7 +738,8 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                                 if (s)
                                 {
                                     s = strstr(s, "Content-Length: ");
-                                    contentlen = atoi(s + 16);
+                                    if (s)
+                                        contentlen = atoi(s + 16);
                                 }
                             }
 
@@ -741,7 +759,8 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                                     if (contenttotal == 0)
                                     {
                                         s = strstr(s, "/");
-                                        contenttotal = atoi(s + 1);
+                                        if (s)
+                                            contenttotal = atoi(s + 1);
                                     }
                                 }
                             }
@@ -881,8 +900,7 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                                         break;
                                     }
                                     ESP_LOGW(TAG, "Firmware update complete, rebooting now!");
-                                    if (xHandleWifi)
-                                        xTaskNotify(xHandleWifi, REBOOT_NOW, eSetValueWithOverwrite);
+                                    xEventGroupSetBits(status_event_group, REBOOT_NOW); // перезагрузка после обновления (ждет wifi_task)
 
                                     session_retry = 0;
                                     http_error_retry = 0; // All OK
@@ -905,8 +923,7 @@ esp_err_t download_firmware(char *rx_buffer, char *tx_buffer)
                                         remaining -= recv_len;
                                     }
                                     ESP_LOGW(TAG, "SPIFFS update complete, rebooting now!");
-                                    if (xHandleWifi)
-                                        xTaskNotify(xHandleWifi, REBOOT_NOW, eSetValueWithOverwrite);
+                                    xEventGroupSetBits(status_event_group, REBOOT_NOW); // перезагрузка после обновления (ждет wifi_task)
 
                                     session_retry = 0;
                                     http_error_retry = 0; // All OK

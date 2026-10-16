@@ -291,7 +291,7 @@ void i2c_task(void *arg)
 
             if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_PULLDOWN | NOTYFY_EXPANDER_P1_PULLDOWN | NOTYFY_EXPANDER_P0_PULLUP | NOTYFY_EXPANDER_P1_PULLUP | NOTYFY_EXPANDER_P0_PULLDIS | NOTYFY_EXPANDER_P1_PULLDIS | NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_DOWN | NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_DOWN))
             {
-                // ESP_LOGI("PI4IOE5V6408", "Set output");
+                ESP_LOGD("PI4IOE5V6408", "Set 0x%x", ulNotifiedValue);
                 //  Register 03h : I/O Direction
                 cmd[0] = 0x03;
                 cmd[1] = 0x00;
@@ -321,9 +321,9 @@ void i2c_task(void *arg)
                 // Register 07h : Output High-Impedance
                 cmd[0] = 0x07;
                 cmd[1] = 0xff;
-                if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_DOWN | NOTYFY_EXPANDER_P0_PULLUP))
+                if (ulNotifiedValue & (NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P0_DOWN))
                     cmd[1] &= ~BIT0;
-                if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P1_PULLUP))
+                if (ulNotifiedValue & (NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P1_DOWN))
                     cmd[1] &= ~BIT1;
 
                 ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_master_transmit(exp_handle, cmd, 2, I2C_TIMEOUT_VALUE_MS));
@@ -354,14 +354,14 @@ void i2c_task(void *arg)
                 //     ESP_LOGI("PI4IOE5V6408", "Register 0x%02x: 0x%02x", cmd[0], buffer[0]);
                 // };
 
-                /*
-                vTaskDelay(1);
+                
                 cmd[0] = 0x00;
                 err_rc = i2c_master_transmit_receive(exp_handle, cmd, 1, buffer, 16, I2C_TIMEOUT_VALUE_MS);
                 if (err_rc == ESP_OK)
                 {
                     ESP_LOG_BUFFER_HEX("PI4IOE5V6408", buffer, 16);
-                }; */
+                }; 
+                
                 /*
                                 cmd[0] = 0x05;
                                 err_rc = i2c_master_transmit_receive(exp_handle, cmd, 1, buffer, 1, I2C_TIMEOUT_VALUE_MS);

@@ -14,6 +14,7 @@ void modem_task(void *arg)
 {
     char data[RX_BUF_SIZE];
     char send_data[TX_BUF_SIZE];
+    char datetime[DATETIME_STR_SIZE]; // общий буфер строки даты/времени
 
     bool cpsms0 = false;
 
@@ -411,7 +412,8 @@ void modem_task(void *arg)
                         time_t t = mktime(&tm) + timezone * 3600; // UNIX time + timezone offset
                         struct timeval now = {.tv_sec = t};
                         settimeofday(&now, NULL);
-                        ESP_LOGI(TAG, "Set date and time: %s", get_datetime(time(0)));
+                        get_datetime_str(time(0), datetime, sizeof(datetime));
+                        ESP_LOGI(TAG, "Set date and time: %s", datetime);
                     }
                 }
             }
@@ -421,7 +423,8 @@ void modem_task(void *arg)
 
             if (espnow_need_send)
             {
-                snprintf((char *)send_data, TX_BUF_SIZE, OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+                get_datetime_str(result.ttime, datetime, sizeof(datetime));
+                snprintf((char *)send_data, TX_BUF_SIZE, OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
                 send_by_espnow(mac_addr, send_data);
                 espnow_need_send = false;
             }
@@ -529,7 +532,8 @@ void modem_task(void *arg)
             if (chip == 7028)
             {
                 at_reply_wait_OK("AT+NETOPEN\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
-                int l = snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+                get_datetime_str(result.ttime, datetime, sizeof(datetime));
+                int l = snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
 
                 at_reply_wait_OK("AT+CIPRXGET=1\r\n", (char *)data, 1000 / portTICK_PERIOD_MS);
 
@@ -642,7 +646,8 @@ void modem_task(void *arg)
                             else
                             {
                                 // result.measure.d_nbiot_error = false;
-                                int l = snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, get_datetime(result.ttime), OUT_MEASURE_VARS(result.measure));
+                                get_datetime_str(result.ttime, datetime, sizeof(datetime));
+                                int l = snprintf(send_data, sizeof(send_data), OUT_JSON, get_menu_val_by_id("idn"), result.measure.bootcount, datetime, OUT_MEASURE_VARS(result.measure));
                                 ESP_LOGD(TAG, "Send... %s", send_data);
                                 do
                                 {

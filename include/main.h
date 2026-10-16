@@ -12,8 +12,8 @@
 #define MODEM_POWER GPIO_NUM_10
 #define PIN_BATT GPIO_NUM_0 // пробуждение от зарядки
 #define PIN_LIGHT GPIO_NUM_4 // пробуждение от света
-#define PIN_WATER1 GPIO_NUM_2
-#define PIN_WATER2 GPIO_NUM_3
+#define PIN_WATER1 GPIO_NUM_3
+#define PIN_WATER2 GPIO_NUM_2
 #define PIN_ONEWARE GPIO_NUM_8
 #define PIN_BUTTON_BOOT GPIO_NUM_9
 
@@ -133,9 +133,13 @@ esp_err_t read_nvs_id(const char *key, uint64_t *out_value);
 bool check_range(int x, int y, int z, int setx, int sety, int setz, int devi);
 
 float get_temperature_sensor();
-void water_cont_measure(int mode, bool printdata);
+void water_cont_measure(bool printdata);
 
-char *get_datetime(time_t ttime);
+// Размер строки "ГГГГ-ММ-ДД чч:мм:сс" вместе с завершающим '\0'
+#define DATETIME_STR_SIZE 24
+// Формирует строку даты/времени в буфере вызывающего (реентерабельно, общего состояния нет).
+// Вызывающий объявляет массив char[DATETIME_STR_SIZE] и передаёт его сюда.
+char *get_datetime_str(time_t ttime, char *out, size_t cap);
 
 typedef struct
 {
@@ -159,8 +163,8 @@ typedef struct
             bool d_acc_int : 1; // пробуждение от прерывания ACC
             bool d_charge : 1;  // пробуждение от зарядки
 
-            bool d_light_mode : 1; // режим высокой освещенности (включена нижняя подтяжка)
-            bool d_wet_mode : 1;   // режим высокой влажности (включена нижняя подтяжка)
+            bool d_light_mode : 1; // режим высокой освещенности (пробуем нижнюю подтяжку для компенсации)
+            bool d_wet_mode : 1;   // режим высокой влажности (пробуем нижнюю подтяжку для компенсации)
             bool reserved7 : 1;
             bool d_nbiot_send_succes : 1; // признак успешной передачи NBIoT
 

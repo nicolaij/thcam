@@ -280,7 +280,6 @@ static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_c
         // Writes a 1 to the Clear register for bit 1 -> Drives GPIO LOW
         GPIO.out_w1tc.val = (1UL << PIN_WATER2);
 
-        // xTaskNotifyFromISR(xTaskI2C, NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P0_DOWN, eSetBits, &mustYield);
         adc_switch = 0;
     }
     else
@@ -292,7 +291,6 @@ static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_c
         // Writes a 1 to the Clear register for bit 1 -> Drives GPIO LOW
         GPIO.out_w1tc.val = (1UL << PIN_WATER1);
 
-        // xTaskNotifyFromISR(xTaskI2C, NOTYFY_EXPANDER_P0_UP | NOTYFY_EXPANDER_P1_DOWN, eSetBits, &mustYield);
         adc_switch = 1;
     }
     // ESP_DRAM_LOGI(TAG, "s_conv_done_cb %i %i", adc_switch, mustYield);
@@ -337,7 +335,7 @@ int compare_floats(const void *a, const void *b)
     return (fa > fb) - (fa < fb); // Возвращает -1, 0 или 1 (безопасно против переполнения)
 }
 
-void water_cont_measure(int mode, bool printdata)
+void water_cont_measure(bool printdata)
 {
     uint32_t ret_num = 0;
     esp_err_t ret = 0;
@@ -350,43 +348,26 @@ void water_cont_measure(int mode, bool printdata)
     int water_corr = 0;
     int water_corr_cnt = 0;
 
-    ESP_LOGI("adc", "water_cont_measure");
+    // ESP_LOGI("adc", "water_cont_measure");
 
-    switch (mode)
-    {
-    case 1: // 10k
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP | NOTYFY_EXPANDER_P0_UP, eSetBits);
-        break;
-    case 2: // 50k
-        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_PULLUP_ONLY));
-        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
-        break;
-    case 3: // 100k
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_PULLUP | NOTYFY_EXPANDER_P0_PULLUP, eSetBits);
-        break;
-    case 5: // 50k / 50k
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P0_DOWN, eSetBits);
-        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_PULLUP_ONLY));
-        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
-        break;
-    default:
-        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_FLOATING));
-        ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_FLOATING));
-        break;
-    }
+    // 50k к +VCC, 10k к GND
+    xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_DOWN | NOTYFY_EXPANDER_P0_DOWN, eSetBits);
+    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_PULLUP_ONLY));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
 
     // ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_OUTPUT));
     // ESP_ERROR_CHECK(gpio_set_level(PIN_WATER1, 0));
     // ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_OUTPUT));
     // ESP_ERROR_CHECK(gpio_set_level(PIN_WATER2, 0));
 
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+
     ESP_ERROR_CHECK(adc_continuous_flush_pool(cont_handle));
 
     adc_switch = 0;
-    vTaskDelay(20 / portTICK_PERIOD_MS);
 
     ESP_ERROR_CHECK(adc_continuous_start(cont_handle));
-    // ESP_LOGI("adc", "adc_continuous_start");
+    ESP_LOGD("adc", "adc_continuous_start");
 
     while (len < sizeof(adcresult))
     {
@@ -402,23 +383,25 @@ void water_cont_measure(int mode, bool printdata)
     ESP_LOGD("adc", "adc_continuous_stop");
 
     ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER1, GPIO_MODE_INPUT));
-    // ESP_ERROR_CHECK(gpio_input_enable(PIN_WATER1));
-    // ESP_ERROR_CHECK(gpio_reset_pin(PIN_WATER1));
+    //  ESP_ERROR_CHECK(gpio_input_enable(PIN_WATER1));
+    //  ESP_ERROR_CHECK(gpio_reset_pin(PIN_WATER1));
 
     ESP_ERROR_CHECK(gpio_set_direction(PIN_WATER2, GPIO_MODE_INPUT));
-    // ESP_ERROR_CHECK(gpio_input_enable(PIN_WATER2));
-    // ESP_ERROR_CHECK(gpio_reset_pin(PIN_WATER2));
+    //  ESP_ERROR_CHECK(gpio_input_enable(PIN_WATER2));
+    //  ESP_ERROR_CHECK(gpio_reset_pin(PIN_WATER2));
 
     // xTaskNotify(xTaskI2C, (NOTYFY_EXPANDER_RESET), eSetBits);
     // xTaskNotify(xTaskI2C, (NOTYFY_EXPANDER_P0_PULLDIS | NOTYFY_EXPANDER_P1_PULLDIS), eSetBits);
-    xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_PULLDOWN | NOTYFY_EXPANDER_P0_PULLDOWN, eSetBits);
+    // xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_PULLDOWN | NOTYFY_EXPANDER_P0_PULLDOWN, eSetBits);
 
-    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_FLOATING));
-    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_FLOATING));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER1, GPIO_PULLDOWN_ONLY));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLDOWN_ONLY));
+
+    // vTaskDelay(20 / portTICK_PERIOD_MS);
 
     if (len > 0)
     {
-        ESP_LOGI(TAG, "latest ret is %x, ret_num is %" PRIu32 " bytes, total len: %i", ret, ret_num, len);
+        ESP_LOGD(TAG, "latest ret is %x, ret_num is %" PRIu32 " bytes, total len: %i", ret, ret_num, len);
 
         water_min = 0;
         water_max = 0;
@@ -485,8 +468,21 @@ void water_cont_measure(int mode, bool printdata)
         water_min = 0;
         p = ((adc_digi_output_data_t *)&adcresult[nmbr]); // вторая половина измерений
 
+        // Границы буфера: последний блок, у которого есть все используемые отступы (до +19)
+        adc_digi_output_data_t *p_end = (adc_digi_output_data_t *)&adcresult[len];
+        adc_digi_output_data_t *p_stop = p_end - 20;
+
         for (int i = 0; i < 10; i++) // усредняем по 10-ти измерениям
         {
+            // из за пропуска прерываний направление измерений может отличаться
+            while (p <= p_stop && (p + 2)->type2.data < (p + 3)->type2.data)
+            {
+                p = p + 20; //Полярность неверная, следующий блок
+            }
+
+            if (p > p_stop) // полярность не найдена до конца буфера
+                break;
+
             if (p->type2.channel == PIN_WATER1)
             {
                 ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 2)->type2.data, &v1)); // второе измерение
@@ -495,20 +491,28 @@ void water_cont_measure(int mode, bool printdata)
                 ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 18)->type2.data, &v1)); // последнее измерение
                 sum_w1_end += v1;
 
-                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 3)->type2.data, &v2)); // второе измерение
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, (p + 3)->type2.data, &v2)); // второе измерение
                 water_min = water_min + v2;
 
                 count_w1++;
 
                 p = p + 20;
             }
+            
+            while (p <= p_stop && (p + 2)->type2.data > (p + 3)->type2.data)
+            {
+                p = p + 20; //следующий блок
+            }
+
+            if (p > p_stop) // полярность не найдена до конца буфера
+                break;
 
             if ((p + 1)->type2.channel == PIN_WATER2)
             {
                 ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, (p + 3)->type2.data, &v2)); // второе измерение
                 sum_w2 += v2;
 
-                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 19)->type2.data, &v2)); // последнее измерение
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, (p + 19)->type2.data, &v2)); // последнее измерение
                 sum_w2_end += v2;
 
                 ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, (p + 2)->type2.data, &v1)); // второе измерение
@@ -526,161 +530,28 @@ void water_cont_measure(int mode, bool printdata)
             return;
         }
 
-        /*
-    while (nmbr < len)
-    {
-        adc_digi_output_data_t *p = (adc_digi_output_data_t *)&adcresult[nmbr];
-        uint32_t data = p->type2.data;
-
-        if (p->type2.channel == PIN_WATER2)
-        {
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle2, data, &v2));
-        }
-
-        if (p->type2.channel == PIN_WATER1)
-        {
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(cal_handle1, data, &v1));
-            v2 = 0;
-        }
-
-                    if ((cnt % 20) == 0)
-                    {
-                        x = 0;
-                        sum_x = 0;
-                        sum_y = 0;
-                        sum_xx = 0;
-                        sum_xy = 0;
-                    }
-
-                    if (p->type2.channel == PIN_WATER2)
-                    {
-                        if (printdata)
-                        {
-                            printf("%d: %d,%d (%ld)\n", cnt, v1, v2, data);
-                        }
-
-                        if (cnt % 40 == 3)
-                        {
-                            water_min += v2;
-                            water_cnt++;
-                            water_corr += v1;
-                            water_corr_cnt++;
-                        }
-                        else if (cnt % 40 == 23)
-                        {
-                            water_min += v1;
-                            water_cnt++;
-                            water_corr += v2;
-                            water_corr_cnt++;
-                        }
-                        else if (cnt % 40 == 19)
-                        {
-                            water_max += v2;
-                        }
-                        else if (cnt % 40 == 39)
-                        {
-                            water_max += v1;
-                        }
-
-                        if (cnt % 2 == 1)
-                        {
-                            x++;
-                            sum_x += x;
-                            sum_xx += x * x;
-
-                            if (cnt % 40 < 20)
-                            {
-                                sum_y += v2;
-                                sum_xy += x * v2;
-                            }
-                            else
-                            {
-                                sum_y += v1;
-                                sum_xy += x * v1;
-                            }
-                        }
-
-                        if (cnt % 20 == 19)
-                        {
-                            data_k[count_k] = (10.0f * sum_xy - sum_x * sum_y) / (10.0f * sum_xx - sum_x * sum_x);
-                            data_b[count_k] = (sum_y - (k)*sum_x) / 10.0f;
-
-                            if (printdata)
-                                printf("%d: %.1f,%.1f\n", x, data_k[count_k], data_b[count_k]);
-
-                            count_k++;
-                        }
-                    }
-
-
-        if (p->type2.channel == PIN_WATER2)
-        {
-            if (printdata)
-            {
-                printf("%d: %d,%d (%ld)\n", cnt, v1, v2, data);
-            }
-        };
-
-        cnt++;
-        nmbr += SOC_ADC_DIGI_RESULT_BYTES;
-    }
-
-    if (printdata)
-        printf("\n");
-
-
-            qsort(data_k, DATASZ, sizeof(float), compare_floats);
-            qsort(data_b, DATASZ, sizeof(float), compare_floats);
-
-    #define CHOSEN_COUNT 20
-
-            // Поиск подмассива с минимальным разбросом (Max - Min)
-            int best_startk = 0;
-            float min_rangek = data_k[CHOSEN_COUNT - 1] - data_k[0];
-            int best_startb = 0;
-            float min_rangeb = data_b[CHOSEN_COUNT - 1] - data_b[0];
-
-            for (int i = 1; i <= (DATASZ - CHOSEN_COUNT); i++)
-            {
-                float current_rangek = data_k[i + CHOSEN_COUNT - 1] - data_k[i];
-                if (current_rangek < min_rangek)
-                {
-                    min_rangek = current_rangek;
-                    best_startk = i;
-                }
-
-                float current_rangeb = data_b[i + CHOSEN_COUNT - 1] - data_b[i];
-                if (current_rangeb < min_rangeb)
-                {
-                    min_rangeb = current_rangeb;
-                    best_startb = i;
-                }
-            }
-
-            int count2_k = 0;
-            sum_k = 0;
-            sum_b = 0;
-            for (int i = 0; i < CHOSEN_COUNT; i++)
-            {
-                sum_k += data_k[i + best_startk];
-                sum_b += data_b[i + best_startb];
-                count2_k++;
-            }
-
-            k = sum_k / count2_k;
-            b = sum_b / count2_k;
-
-            float w2 = 0;
-
-            if (upper_mv != water_corr / water_corr_cnt)
-                w2 = ((float)upper_mv - b) * 100.0f / (upper_mv - water_corr / water_corr_cnt);
-    */
         // среднее между 1 и 9-ым измерением
         int avg = ((sum_w1 + sum_w2) / 20 + (sum_w1_end + sum_w2_end) / 20) / 2;
-        b = 100.0f - 100.0f / ((water_max - water_min) / 20) * (((sum_w1 + sum_w2) - water_min) / 20);
-        if (b < 0)
-            b = 0;
-        k = ((sum_w1_end + sum_w2_end) - (sum_w1 + sum_w2)) / 20 / 8.0f;
+        // размах сигнала между "сухим" и "смоченным" состоянием (мВ)
+        float span = (water_max - water_min) / 20.0f;
+        if (span > 1.0f) // при нулевом/отрицательном размахе деление дает inf/nan
+        {
+            b = 100.0f - 100.0f / span * (((sum_w1 + sum_w2) - water_min) / 20.0f);
+        }
+        else
+        {
+            b = 0.0f; // сигнал не меняется - влажность достоверно не определить
+            ESP_LOGW("Water", "Малый размах: min %d мВ, max %d мВ", water_min / 20, water_max / 20);
+        }
+        if (b < 0.0f)
+            b = 0.0f;
+        if (b > 100.0f)
+            b = 100.0f;
+        k = ((sum_w1_end + sum_w2_end) - (sum_w1 + sum_w2)) / 20.0f / 8.0f;
+        if (k < 0.0f)
+            k = 0.0f;
+        if (k > 100.0f)
+            k = 100.0f;
         ESP_LOGI("Water", "min: %d мВ, max: %d мВ, Water: (%d) %.1f%%, k: %.3f%%", water_min / 20, water_max / 20, avg, b, k);
         result.measure.water = b;
         result.measure.waterk = k;
@@ -720,7 +591,11 @@ void light_measure(int test_count)
         }
     };
 
-    result.measure.light = sum / cnt * (100.0 - top) / l_max;
+    // cnt == 0, если все чтения ADC вернули ошибку - считаем, что света нет
+    if (cnt > 0)
+        result.measure.light = sum / cnt * (100.0 - top) / l_max;
+    else
+        result.measure.light = 0;
 
     int l = 0;
     gpio_pulldown_dis(PIN_LIGHT);
@@ -747,7 +622,8 @@ void light_measure(int test_count)
         }
     };
 
-    result.measure.light += sum / cnt * top / l_max;
+    if (cnt > 0)
+        result.measure.light += sum / cnt * top / l_max;
 
     ESP_LOGI(TAG, "Light: %.1f%% (%d / %d mV, max: %d mV)", result.measure.light, l, light2, l_max);
 }
@@ -801,7 +677,7 @@ void dio_task(void *arg)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Ожидаем уведомления безконечно, для повторного поиска
 
-        water_cont_measure(5, false);
+        water_cont_measure(false);
 
         // vTaskDelay(1);
 
@@ -881,12 +757,17 @@ uint64_t dio_check(uint64_t wake_mask)
         result.measure.d_light_mode = 1;
     }
 
+    // ESP_LOGD("pins:", "PIN_WATER1: %d, PIN_WATER2: %d", gpio_get_level(PIN_WATER1), gpio_get_level(PIN_WATER2));
+
     if (bootCount % 2 == 1)
     {
         // Подтяжка PIN_WATER1 через 10к к + питания
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP, eSetBits); //NOTYFY_EXPANDER_P1_PULLDOWN - автоматически
+        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P0_UP, eSetBits); // NOTYFY_EXPANDER_P1_PULLDOWN - автоматически
         // ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+
+        // ESP_LOGD("pins:", "PIN_WATER1: %d, PIN_WATER2: %d", gpio_get_level(PIN_WATER1), gpio_get_level(PIN_WATER2));
+
         if (gpio_get_level(PIN_WATER2) != 0)
         {
             gpio_pulldown_en(PIN_WATER2);
@@ -896,9 +777,12 @@ uint64_t dio_check(uint64_t wake_mask)
     else
     {
         // Подтяжка PIN_WATER2 через 10к к + питания
-        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP, eSetBits); //NOTYFY_EXPANDER_P0_PULLDOWN - автоматически
+        xTaskNotify(xTaskI2C, NOTYFY_EXPANDER_P1_UP, eSetBits); // NOTYFY_EXPANDER_P0_PULLDOWN - автоматически
         // ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_WATER2, GPIO_PULLUP_ONLY));
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+
+        // ESP_LOGD("pins:", "PIN_WATER1: %d, PIN_WATER2: %d", gpio_get_level(PIN_WATER1), gpio_get_level(PIN_WATER2));
+
         if (gpio_get_level(PIN_WATER1) != 0)
         {
             gpio_pulldown_en(PIN_WATER1);
@@ -907,6 +791,8 @@ uint64_t dio_check(uint64_t wake_mask)
     }
 
     vTaskDelay(10 / portTICK_PERIOD_MS);
+
+    // ESP_LOGD("pins:", "PIN_WATER1: %d, PIN_WATER2: %d", gpio_get_level(PIN_WATER1), gpio_get_level(PIN_WATER2));
 
     if (gpio_get_level(PIN_WATER1) != gpio_get_level(PIN_WATER2))
     {
@@ -1068,7 +954,7 @@ void btn_task(void *arg)
                 ESP_LOGI("IO", "Button long press! %d", output + 1);
                 debounce = 0;
 
-                water_cont_measure(5, true);
+                water_cont_measure(true);
 
                 // gpio_config_t io_conf = {};
                 /*
